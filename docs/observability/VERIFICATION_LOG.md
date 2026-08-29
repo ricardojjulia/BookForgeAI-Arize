@@ -49,7 +49,8 @@ No OpenTelemetry, OpenInference, Phoenix, or Arize instrumentation had been adde
 - `@opentelemetry/sdk-node`: 0.221.0
 - Initial HTTP exporter: `@opentelemetry/exporter-trace-otlp-http` 0.221.0
 - Phoenix transport diagnosis: HTTP/JSON export reached Phoenix but was rejected with `415 Unsupported Media Type` on `/v1/traces`.
-- Corrective direction: OTLP HTTP/Protobuf exporter for Phoenix `/v1/traces`.
+- Corrected exporter: `@opentelemetry/exporter-trace-otlp-proto` 0.221.0 using OTLP HTTP/Protobuf to Phoenix `/v1/traces`.
+- Exporter correction commit: `16e440e`.
 - `@opentelemetry/resources`: 2.10.0
 - `@opentelemetry/semantic-conventions`: 1.43.0
 - `@arizeai/openinference-semantic-conventions`: 2.8.0
@@ -79,12 +80,92 @@ No OpenTelemetry, OpenInference, Phoenix, or Arize instrumentation had been adde
 - Server route returned HTTP 200.
 - Phoenix ingestion: PASS — Phoenix UI visibly shows project `bookforge-ai-arize` and the manual `bookforge.telemetry.trace-test` span within the Next.js request trace hierarchy.
 - Context propagation: PASS — manual BookForge span is nested in the surrounding Next.js request/route trace.
-- Exact final trace-ID/attribute screenshot capture remains useful evidence but is no longer blocking transport verification.
 
 ### Gate Status
 - Gate 3A — Phoenix local backend: PASS
 - Gate 3B — telemetry bootstrap + fail-open: PASS
 - Gate 4 — first exported trace: PASS
 
+## 2026-08-29 — Phase 5 Managed LLM Instrumentation
+
+### Foundation Changes
+- Privacy-safe OpenInference LLM span wrapper added in commit `84b7437`.
+- Provider-aware model telemetry context added in commit `504b821`.
+- Live managed LLM tracing committed as `298790a5d027ebec55f77c707b0dfe6ad2b11756` (`feat: trace managed LLM calls with OpenInference`).
+- `createManagedChatCompletion()` remains the BookForge-managed generation chokepoint.
+- Existing credit reservation, provider invocation, retry behavior, model-performance telemetry, and credit reconciliation were preserved.
+- Raw prompt/completion capture remains disabled and unsupported in this foundation path.
+
+### Static / Regression Gate
+Immediately before live verification:
+- `npm run lint` — PASS.
+- `npm test` — PASS; 109/109 test files, 453/453 tests.
+- `npm run build` — PASS; Next.js production build completed successfully.
+- Pre-existing Vite, negative-path stderr, and CreativeWriter CSS warnings remained non-blocking and unchanged.
+
+### Live Managed LLM Verification
+A real BookForge Create Book → Concept request exercised the production-style managed path:
+
+`POST /api/creation/concept` → `selectAndPrepareActiveModel()` → `createManagedChatCompletion()` → LM Studio.
+
+Phoenix trace evidence:
+- Phoenix project: `bookforge-ai-arize`.
+- Real request trace: `POST /api/creation/concept`.
+- Manual LLM child span: `bookforge.llm.planning`.
+- Phoenix classified the span as `llm`.
+- Span status: OK.
+- Observed span latency: approximately 36.5 seconds.
+- Span nested correctly within the surrounding Next.js request/route trace.
+
+Verified span attributes:
+- `bookforge.task = planning`
+- `bookforge.provider = lmstudio`
+- `bookforge.execution = local`
+- `bookforge.attempt = 1`
+- `bookforge.retry = false`
+- `bookforge.model.requested = qwen/qwen3.6-35b-a3b`
+- `bookforge.model.resolved = qwen/qwen3.6-35b-a3b`
+- `openinference.span.kind = LLM`
+- `llm.model_name = qwen/qwen3.6-35b-a3b`
+- `bookforge.message_count = 1`
+- `bookforge.input_chars = 1660`
+- `bookforge.estimated_input_tokens = 519`
+- `bookforge.max_output_tokens = 3500`
+- `bookforge.output_chars = 1518`
+- `bookforge.output_words = 231`
+- `llm.token_count.prompt = 439`
+- `llm.token_count.completion = 3499`
+- `llm.token_count.total = 3938`
+
+Verified span event:
+- Event: `provider.attempt`
+- `attempt = 1`
+- `model = qwen/qwen3.6-35b-a3b`
+
+Provider attribution was independently consistent with the trace's real HTTP traffic to LM Studio at `localhost:1234`, while the semantic provider value itself came from BookForge configuration rather than inference from the OpenAI-compatible transport.
+
+### Privacy Verification
+PASS.
+
+The live LLM span exposed metadata/counts only. Phoenix did not show the raw prompt or generated completion in the LLM span input/output columns, and the custom span attributes/events did not contain manuscript text, book title, author identity, user ID, API key, cookie, bearer token, or Supabase credentials.
+
+### Gate Status
+- Gate 5A — privacy-safe LLM span foundation: PASS
+- Gate 5B — provider-aware telemetry context: PASS
+- Gate 5C — real managed LLM trace: PASS
+- LM Studio provider verification: PASS
+- Local execution attribution: PASS
+- Managed LLM token telemetry: PASS
+- Managed LLM provider-attempt event: PASS
+- Managed LLM privacy-default verification: PASS
+
+### Known-Good Managed LLM Checkpoint
+`298790a5d027ebec55f77c707b0dfe6ad2b11756`
+
 ### Next Gate
-Instrument the real managed LLM call path with manual OpenInference semantics while preserving privacy defaults and true BookForge provider attribution.
+Broaden verification without disturbing the known-good managed-call foundation:
+1. verify at least one real cloud provider path and provider attribution;
+2. verify retry/fallback event behavior when naturally reproducible or through a controlled test;
+3. add higher-level workflow/CHAIN spans around multi-call BookForge workflows;
+4. keep `createManagedChatCompletion()` as the provider-call LLM child-span boundary;
+5. preserve metadata-only privacy defaults and fail-open behavior.
