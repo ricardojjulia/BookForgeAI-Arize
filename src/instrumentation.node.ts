@@ -1,3 +1,4 @@
+import { SEMRESATTRS_PROJECT_NAME } from "@arizeai/openinference-semantic-conventions";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
@@ -34,6 +35,8 @@ if (isEnabled() && !globalThis.__bookforgeOtelStarted) {
     const endpoint =
       process.env.BOOKFORGE_OTEL_ENDPOINT ||
       "http://localhost:6006/v1/traces";
+    const projectName =
+      process.env.BOOKFORGE_OTEL_PROJECT_NAME || "bookforge-ai-arize";
 
     const traceExporter = new OTLPTraceExporter({
       url: endpoint,
@@ -44,14 +47,15 @@ if (isEnabled() && !globalThis.__bookforgeOtelStarted) {
         [ATTR_SERVICE_NAME]:
           process.env.BOOKFORGE_OTEL_SERVICE_NAME || "bookforge-ai-arize",
         [ATTR_SERVICE_VERSION]: process.env.npm_package_version || "unknown",
-        "bookforge.project":
-          process.env.BOOKFORGE_OTEL_PROJECT_NAME || "bookforge-ai-arize",
+        [SEMRESATTRS_PROJECT_NAME]: projectName,
       }),
       traceExporter,
     });
 
     sdk.start();
-    debug(`started; exporting traces to ${endpoint}`);
+    debug(
+      `started; exporting traces to ${endpoint}; Phoenix project=${projectName}`,
+    );
   } catch (error) {
     // Fail open: observability must never prevent BookForge from starting.
     globalThis.__bookforgeOtelStarted = false;
