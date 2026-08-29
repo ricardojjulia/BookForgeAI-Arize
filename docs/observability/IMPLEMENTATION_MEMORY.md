@@ -1,7 +1,7 @@
 # BookForgeAI-Arize Implementation Memory
 
 ## Current Phase
-Phase 6 — LM Studio and OpenRouter managed LLM tracing verified; next target is Critic workflow verification
+Phase 7 — LM Studio, OpenRouter, Creation, and Critic managed LLM tracing verified; next target is workflow-level CHAIN tracing
 
 ## Canonical Local Path
 `/Users/rjulia/programs/BookForgeAI-Arize`
@@ -126,71 +126,54 @@ This is required because BookForge intentionally uses OpenAI-compatible transpor
 
 ## Live Managed LLM Verification — LM Studio
 Verified using the real Create Book → Concept path:
-
-`POST /api/creation/concept` → task `planning` → managed model selection → `createManagedChatCompletion()` → local LM Studio.
-
-Phoenix showed a real nested child span:
-- span name: `bookforge.llm.planning`
-- Phoenix kind: `llm`
-- status: OK
-- approximate latency: 36.5 s
-- parent trace: real `POST /api/creation/concept` request
-
-Verified semantic attributes:
-- `bookforge.task = planning`
-- `bookforge.provider = lmstudio`
-- `bookforge.execution = local`
-- `bookforge.attempt = 1`
-- `bookforge.retry = false`
-- `bookforge.model.requested = qwen/qwen3.6-35b-a3b`
-- `bookforge.model.resolved = qwen/qwen3.6-35b-a3b`
-- `openinference.span.kind = LLM`
-- `llm.model_name = qwen/qwen3.6-35b-a3b`
-- `bookforge.message_count = 1`
-- `bookforge.input_chars = 1660`
-- `bookforge.estimated_input_tokens = 519`
-- `bookforge.max_output_tokens = 3500`
-- `bookforge.output_chars = 1518`
-- `bookforge.output_words = 231`
-- `llm.token_count.prompt = 439`
-- `llm.token_count.completion = 3499`
-- `llm.token_count.total = 3938`
-
-Verified event:
-- `provider.attempt`
-- `attempt = 1`
-- `model = qwen/qwen3.6-35b-a3b`
+- span: `bookforge.llm.planning`
+- provider: `lmstudio`
+- execution: `local`
+- model: `qwen/qwen3.6-35b-a3b`
+- prompt/completion/total tokens: 439 / 3499 / 3938
+- event: `provider.attempt`, attempt 1
 
 ## Live Managed LLM Verification — OpenRouter
-A second real Create Book → Concept request was executed through OpenRouter cloud mode.
-
-Phoenix showed:
-- span name: `bookforge.llm.planning`
-- provider request in the same trace to `https://openrouter.ai/api/v1/...`
-- `bookforge.provider = openrouter`
-- `bookforge.execution = cloud`
-- `bookforge.task = planning`
-- `bookforge.attempt = 1`
-- `bookforge.retry = false`
+Verified using a real Create Book → Concept cloud call:
+- span: `bookforge.llm.planning`
+- provider: `openrouter`
+- execution: `cloud`
 - requested/resolved model: `anthropic/claude-haiku-4.5`
-- `openinference.span.kind = LLM`
-- `llm.model_name = anthropic/claude-haiku-4.5`
-- prompt tokens: 468
-- completion tokens: 1280
-- total tokens: 1748
-- input chars: 1660
-- estimated input tokens: 519
-- output chars: 5378
-- output words: 713
-- max output tokens: 3500
-- event `provider.attempt`, attempt 1, model `anthropic/claude-haiku-4.5`
+- prompt/completion/total tokens: 468 / 1280 / 1748
+- event: `provider.attempt`, attempt 1
 
-This is important proof that provider and model family are separate dimensions. OpenRouter is the provider even when the model identifier is namespaced to Anthropic. The semantic provider comes from BookForge configuration, not the OpenAI-compatible SDK transport.
+This proves provider and model family are separate dimensions. OpenRouter is the provider even when the model identifier is namespaced to Anthropic.
+
+## Critic Workflow Verification
+A real drafted-book Critic run was executed through OpenRouter using the existing managed LLM instrumentation.
+
+Phoenix visibly showed eight `bookforge.llm.critic` spans in the same trace, matching BookForge's eight supported Critic lenses. This is the first verified multi-call BookForge workflow.
+
+Selected verified example span:
+- span name: `bookforge.llm.critic`
+- status: OK
+- latency: approximately 7 s
+- provider: `openrouter`
+- execution: `cloud`
+- task: `critic`
+- attempt: 1
+- retry: false
+- requested/resolved model shown as `google/gemini-2.5-flash-lite`
+- OpenInference kind: `LLM`
+- message count: 1
+- estimated input tokens: 897
+- output chars: 7327
+- output words: 1023
+- total token count shown by Phoenix: 2183
+- event count: 1 (`provider.attempt`)
+- same trace showed outbound OpenRouter chat-completion HTTP calls
+
+The custom Critic LLM span remained metadata-only; no raw manuscript content was visible in the displayed custom attributes.
 
 ## Critic Workflow Architecture
-`runCriticLens()` uses `selectAndPrepareActiveModel()` with `task: "critic"` and calls `createManagedChatCompletion()` through the already-verified managed LLM boundary.
+`runCriticLens()` selects models with `task: "critic"` and calls `createManagedChatCompletion()` through the verified managed LLM boundary.
 
-The critic path supports up to two completion attempts. On cloud execution, an empty first completion can retry using fallback model `google/gemini-2.5-flash`. That fallback is a useful later verification target, but the immediate next gate is a normal successful Critic lens run with no code changes.
+The Critic path supports up to two completion attempts. On cloud execution, an empty first completion can retry using fallback model `google/gemini-2.5-flash`. That fallback remains a useful later verification target.
 
 ## Trace Export
 Operational end to end:
@@ -200,20 +183,19 @@ BookForge → OpenTelemetry API → NodeSDK → OTLP HTTP/Protobuf → Phoenix p
 Disabled by default.
 - `BOOKFORGE_TRACE_CONTENT=false`
 - `BOOKFORGE_TRACE_USER_IDENTIFIERS=false`
-- Live managed LLM spans showed metadata/counts only.
-- Phoenix input/output columns for the custom LLM spans did not display raw prompt or generated completion.
-- No custom attribute/event contained manuscript content, book title, author identity, user ID, API key, cookie, bearer token, or Supabase credential.
+- Live managed LLM spans show metadata/counts rather than raw prompt/completion content.
+- No custom attribute/event should contain manuscript content, book title, author identity, user ID, API key, cookie, bearer token, or Supabase credential.
 
 ## Verified Providers
 - [x] LM Studio — real managed `planning` call verified in Phoenix
 - [ ] OpenAI
-- [ ] Anthropic
-- [ ] Google
-- [x] OpenRouter — real managed cloud `planning` call verified in Phoenix
+- [ ] Anthropic direct
+- [ ] Google direct
+- [x] OpenRouter — real managed cloud `planning` and `critic` calls verified in Phoenix
 
 ## Verified Workflows
 - [x] Simple managed completion / managed-call boundary
-- [ ] Critic
+- [x] Critic — eight LLM spans visible in one real Critic trace
 - [x] Creation — Concept planning path verified locally and through OpenRouter
 - [ ] Rewrite
 - [ ] Auto Review
@@ -227,17 +209,16 @@ Disabled by default.
 - Gate 5B — provider-aware telemetry context: PASS
 - Gate 5C — real managed LLM trace: PASS
 - Gate 6A — OpenRouter cloud provider verification: PASS
+- Gate 7A — Critic workflow managed LLM verification: PASS
 
 ## Known-Good Checkpoints
 - Immutable pre-observability rollback anchor: `arize-baseline-verified` → `3e9c54c79799530be15569a4e9fd83488f021604`
 - Verified managed LLM instrumentation checkpoint: `298790a5d027ebec55f77c707b0dfe6ad2b11756`
 
 ## Next Action
-1. Keep the verified managed-call boundary stable; no instrumentation code changes are required for the next test.
-2. Run one real BookForge Critic lens on an existing drafted book.
-3. Confirm Phoenix shows `bookforge.llm.critic` with correct provider/execution/model/token metadata and no raw manuscript content.
-4. Record Critic workflow verification.
-5. Later verify the Critic empty-completion fallback path or another controlled retry/fallback path.
-6. Expand workflow verification to Rewrite and Auto Review.
-7. Preserve metadata-only privacy defaults and fail-open behavior.
-8. After broader local Phoenix verification, prove the same OTLP design against Arize AX and keep the exporter backend-neutral for future Dynatrace targeting.
+1. Add one privacy-safe higher-level CHAIN/workflow span around a multi-call Critic run, while leaving `createManagedChatCompletion()` as the LLM child-span boundary.
+2. Verify in Phoenix that the Critic workflow span parents the individual `bookforge.llm.critic` spans.
+3. Use that workflow wrapper pattern for Rewrite and Auto Review.
+4. Keep retry/fallback verification as a separate controlled gate.
+5. Preserve metadata-only privacy defaults and fail-open behavior.
+6. After broader Phoenix verification, prove the same OTLP design against Arize AX and retain backend neutrality for future Dynatrace targeting.
