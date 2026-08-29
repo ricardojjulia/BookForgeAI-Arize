@@ -47,7 +47,9 @@ No OpenTelemetry, OpenInference, Phoenix, or Arize instrumentation had been adde
 ### Dependency Checkpoint
 - `@opentelemetry/api`: 1.9.1
 - `@opentelemetry/sdk-node`: 0.221.0
-- `@opentelemetry/exporter-trace-otlp-http`: 0.221.0
+- Initial HTTP exporter: `@opentelemetry/exporter-trace-otlp-http` 0.221.0
+- Phoenix transport diagnosis: HTTP/JSON export reached Phoenix but was rejected with `415 Unsupported Media Type` on `/v1/traces`.
+- Corrective direction: OTLP HTTP/Protobuf exporter for Phoenix `/v1/traces`.
 - `@opentelemetry/resources`: 2.10.0
 - `@opentelemetry/semantic-conventions`: 1.43.0
 - `@arizeai/openinference-semantic-conventions`: 2.8.0
@@ -60,10 +62,11 @@ No OpenTelemetry, OpenInference, Phoenix, or Arize instrumentation had been adde
 ### Telemetry Bootstrap
 - Next.js Node-only registration added.
 - NodeSDK initialized behind `BOOKFORGE_OTEL_ENABLED=true`.
-- OTLP/HTTP endpoint: `http://localhost:6006/v1/traces`.
+- OTLP endpoint: `http://localhost:6006/v1/traces`.
+- Phoenix project routing uses the OpenInference project-name resource attribute for `bookforge-ai-arize`.
 - Fail-open behavior: PASS.
 - Evidence: BookForge remained available on port 4747 with Phoenix stopped, returning HTTP 200; Phoenix was later restarted independently and returned HTTP 200 on `/healthz`.
-- Startup log observed: `[BookForge OTEL] started; exporting traces to http://localhost:6006/v1/traces`.
+- Startup log observed with configured Phoenix project.
 
 ### Controlled Test Span
 - Endpoint: `/api/telemetry/trace-test`
@@ -71,12 +74,17 @@ No OpenTelemetry, OpenInference, Phoenix, or Arize instrumentation had been adde
 - `ok`: true
 - `tracingEnabled`: true
 - `spanCreated`: true
-- Trace ID: `100844b382f6330133b87f42250c7f28`
-- Span ID: `4d1da296b01062a7`
+- Initial test trace ID: `100844b382f6330133b87f42250c7f28`
+- Initial test span ID: `4d1da296b01062a7`
 - Server route returned HTTP 200.
-- Phoenix UI trace-ID match: PENDING VERIFICATION.
+- Phoenix ingestion: PASS — Phoenix UI visibly shows project `bookforge-ai-arize` and the manual `bookforge.telemetry.trace-test` span within the Next.js request trace hierarchy.
+- Context propagation: PASS — manual BookForge span is nested in the surrounding Next.js request/route trace.
+- Exact final trace-ID/attribute screenshot capture remains useful evidence but is no longer blocking transport verification.
 
 ### Gate Status
 - Gate 3A — Phoenix local backend: PASS
 - Gate 3B — telemetry bootstrap + fail-open: PASS
-- Gate 4 — first exported trace: PARTIAL PASS; BookForge span creation confirmed, Phoenix ingestion/UI match still pending.
+- Gate 4 — first exported trace: PASS
+
+### Next Gate
+Instrument the real managed LLM call path with manual OpenInference semantics while preserving privacy defaults and true BookForge provider attribution.
