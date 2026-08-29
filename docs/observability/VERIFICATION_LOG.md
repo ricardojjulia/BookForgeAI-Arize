@@ -30,6 +30,53 @@
 ### Gate Status
 - Phase 1 repository creation/copy: PASS
 - Phase 2 install/build/test baseline: PASS
-- Remaining baseline check before instrumentation: `npm run lint`
+- Baseline lint: PASS
 
 No OpenTelemetry, OpenInference, Phoenix, or Arize instrumentation had been added at the time of this baseline.
+
+## 2026-08-29 — Phase 3 / Phase 4 Observability Foundation
+
+### Phoenix
+- Docker image: `arizephoenix/phoenix:latest`
+- Verified Phoenix version: 20.4.0
+- HTTP/UI port: 6006
+- OTLP gRPC port: 4317
+- `/healthz`: PASS (HTTP 200)
+- Persistent container name: `bookforge-phoenix`
+
+### Dependency Checkpoint
+- `@opentelemetry/api`: 1.9.1
+- `@opentelemetry/sdk-node`: 0.221.0
+- `@opentelemetry/exporter-trace-otlp-http`: 0.221.0
+- `@opentelemetry/resources`: 2.10.0
+- `@opentelemetry/semantic-conventions`: 1.43.0
+- `@arizeai/openinference-semantic-conventions`: 2.8.0
+- Dependency commit after rebase: `8355c8b`
+- `npm audit`: 0 vulnerabilities
+- `npm run lint`: PASS
+- `npm test`: PASS; 109/109 files, 453/453 tests
+- `npm run build`: PASS
+
+### Telemetry Bootstrap
+- Next.js Node-only registration added.
+- NodeSDK initialized behind `BOOKFORGE_OTEL_ENABLED=true`.
+- OTLP/HTTP endpoint: `http://localhost:6006/v1/traces`.
+- Fail-open behavior: PASS.
+- Evidence: BookForge remained available on port 4747 with Phoenix stopped, returning HTTP 200; Phoenix was later restarted independently and returned HTTP 200 on `/healthz`.
+- Startup log observed: `[BookForge OTEL] started; exporting traces to http://localhost:6006/v1/traces`.
+
+### Controlled Test Span
+- Endpoint: `/api/telemetry/trace-test`
+- Request result: PASS
+- `ok`: true
+- `tracingEnabled`: true
+- `spanCreated`: true
+- Trace ID: `100844b382f6330133b87f42250c7f28`
+- Span ID: `4d1da296b01062a7`
+- Server route returned HTTP 200.
+- Phoenix UI trace-ID match: PENDING VERIFICATION.
+
+### Gate Status
+- Gate 3A — Phoenix local backend: PASS
+- Gate 3B — telemetry bootstrap + fail-open: PASS
+- Gate 4 — first exported trace: PARTIAL PASS; BookForge span creation confirmed, Phoenix ingestion/UI match still pending.
