@@ -1,6 +1,10 @@
 import OpenAI from "openai";
 import type { LmStudioSettings, LmStudioTaskKind } from "@/lib/types";
 export type { LmStudioTaskKind } from "@/lib/types";
+import type {
+  BookForgeLlmExecution,
+  BookForgeLlmProvider,
+} from "@/lib/observability/llm-span";
 import {
   getLmStudioContextErrorMessage,
   getLmStudioRuntimeLimits,
@@ -63,7 +67,16 @@ export type PreparedLmStudioModel = {
  * into a jsonb column (job settings) — embedding a client reference there would
  * make it non-serializable.
  */
-export type ModelCallTelemetryContext = ModelCallTelemetry & { task: string; model: string };
+export type ModelCallTelemetryContext = ModelCallTelemetry & {
+  task: string;
+  model: string;
+  provider?: BookForgeLlmProvider;
+  execution?: BookForgeLlmExecution;
+  requestedModel?: string;
+  workflow?: string;
+  attempt?: number;
+  retry?: boolean;
+};
 
 export function createLmStudioClient(settings?: Partial<LmStudioSettings>) {
   return new OpenAI({
