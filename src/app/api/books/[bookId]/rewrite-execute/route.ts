@@ -8,6 +8,7 @@ import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getDraftModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { withBookForgeWorkflowSpan } from "@/lib/observability/workflow-span";
 import { buildFullBookRewriteUnitPrompt } from "@/lib/prompts/builders";
 import { buildRewriteContextPacket } from "@/lib/rewrite/context-packet";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
@@ -773,7 +774,40 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             failed,
             skipped,
           });
-          const settled = await Promise.allSettled(claimedChunk.map((unit) => runUnit(unit)));
+          const settled = await withBookForgeWorkflowSpan(
+            {
+              workflow: "rewrite",
+              operation: "paragraph-chunk",
+              unitCount: claimedChunk.length,
+            },
+            async (workflowSpan) => {
+              workflowSpan.addEvent("rewrite.chunk.start", {
+                "rewrite.unit_count": claimedChunk.length,
+              });
+
+              const results = await Promise.allSettled(
+                claimedChunk.map((unit) => runUnit(unit)),
+              );
+
+              const fulfilled = results.filter(
+                (result) => result.status === "fulfilled",
+              ).length;
+
+              workflowSpan.setAttributes({
+                "bookforge.workflow.fulfilled_calls": fulfilled,
+                "bookforge.workflow.rejected_calls":
+                  results.length - fulfilled,
+                "bookforge.rewrite.strategy": rewriteStrategy.id,
+              });
+
+              workflowSpan.addEvent("rewrite.chunk.complete", {
+                "rewrite.fulfilled_calls": fulfilled,
+                "rewrite.rejected_calls": results.length - fulfilled,
+              });
+
+              return results;
+            },
+          );
           heartbeat.stop();
           await logDiag("diag_settled_resolved", `results=${settled.length}`);
 
