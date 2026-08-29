@@ -211,5 +211,43 @@ This verifies that provider identity and served model identity are independent d
 - Cloud parent/child trace correlation: PASS
 - Metadata-only privacy posture: PASS
 
+## 2026-08-29 — Phase 7 Critic Workflow Verification
+
+### Live Critic Verification
+A real BookForge Critic run was executed against a drafted book using the existing managed-call instrumentation and OpenRouter cloud execution.
+
+Phoenix evidence:
+- Multiple `bookforge.llm.critic` spans were visible in the same Critic trace; eight Critic LLM spans were visible in the trace tree, matching the eight supported Critic lenses.
+- Selected example span status: OK.
+- Selected example span latency: approximately 7 seconds.
+- Selected example total token count shown by Phoenix: 2,183.
+- The trace independently showed outbound requests to `https://openrouter.ai/api/v1/chat/completions`.
+
+Verified example span attributes:
+- `bookforge.task = critic`
+- `bookforge.provider = openrouter`
+- `bookforge.execution = cloud`
+- `bookforge.attempt = 1`
+- `bookforge.retry = false`
+- requested/resolved model displayed as `google/gemini-2.5-flash-lite`
+- `openinference.span.kind = LLM`
+- `llm.model_name = google/gemini-2.5-flash-lite`
+- `bookforge.message_count = 1`
+- `bookforge.estimated_input_tokens = 897`
+- `bookforge.output_chars = 7327`
+- `bookforge.output_words = 1023`
+
+The selected span also exposed a single provider-attempt event. No raw manuscript content was visible in the custom LLM span attributes shown in Phoenix.
+
+### Critic Gate Status
+- Critic managed LLM span creation: PASS
+- Multi-call Critic trace visibility: PASS
+- OpenRouter semantic provider attribution: PASS
+- Cloud execution attribution: PASS
+- Critic model attribution: PASS
+- Critic token/size telemetry: PASS
+- Critic provider-attempt event: PASS
+- Metadata-only privacy posture: PASS
+
 ### Next Gate
-Verify the Critic workflow using the existing managed-call instrumentation, without changing the known-good LLM boundary. The Critic path uses `task=critic`, and its cloud retry logic can fall back to `google/gemini-2.5-flash` after an empty completion, making it a useful workflow and later fallback-verification target.
+Add a higher-level Critic workflow/CHAIN span so the eight individual `bookforge.llm.critic` child spans are grouped under one semantic BookForge workflow span, then expand the same pattern to Rewrite and Auto Review. Retry/fallback behavior remains a separate later gate.
