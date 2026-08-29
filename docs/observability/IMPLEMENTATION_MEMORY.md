@@ -1,7 +1,7 @@
 # BookForgeAI-Arize Implementation Memory
 
 ## Current Phase
-Phase 4 — Phoenix verified; OpenTelemetry/OpenInference dependencies installed and validated
+Phase 4 — telemetry bootstrap verified; first controlled span created; Phoenix ingestion match pending
 
 ## Canonical Local Path
 `/Users/rjulia/programs/BookForgeAI-Arize`
@@ -54,9 +54,10 @@ These warnings existed before any Arize/OpenTelemetry/OpenInference changes and 
 - Docker image: `arizephoenix/phoenix:latest`
 - Verified Phoenix server version: 20.4.0
 - UI / HTTP endpoint: `http://localhost:6006`
+- OTLP HTTP traces endpoint: `http://localhost:6006/v1/traces`
 - OTLP gRPC: `localhost:4317`
 - `/healthz`: PASS (HTTP 200)
-- Container: `bookforge-phoenix`
+- Persistent container: `bookforge-phoenix`
 
 ## OpenTelemetry / OpenInference Resolved Versions
 - `@opentelemetry/api`: 1.9.1
@@ -69,6 +70,7 @@ These warnings existed before any Arize/OpenTelemetry/OpenInference changes and 
 The mixed OpenTelemetry package version families are expected: API packages use the 1.x line, stable SDK/resource packages use the 2.x line, while some Node/exporter/instrumentation packages retain the 0.x release line. The resolved dependency tree is deduped and internally consistent.
 
 ## Post-Dependency Verification
+- Dependency commit after rebase: `8355c8b`
 - npm install: PASS
 - npm audit: 0 vulnerabilities
 - npm run lint: PASS
@@ -76,13 +78,36 @@ The mixed OpenTelemetry package version families are expected: API packages use 
 - Test files: 109 passed / 109
 - Tests: 453 passed / 453
 - npm run build: PASS
-- Modified files after install: `package.json`, `package-lock.json` only
+
+## Telemetry Bootstrap
+- `src/instrumentation.ts`: Node-runtime-only dynamic import.
+- `src/instrumentation.node.ts`: fail-open NodeSDK initialization.
+- `BOOKFORGE_OTEL_ENABLED=true` successfully starts telemetry.
+- Development duplicate-start guard enabled.
+- Startup log verified: `[BookForge OTEL] started; exporting traces to http://localhost:6006/v1/traces`.
+- Phoenix unavailable while BookForge is running: PASS; BookForge returned HTTP 200.
+- Phoenix unavailable during BookForge cold start: PASS; BookForge started and returned HTTP 200.
+- Phoenix restart independent of BookForge: PASS.
+
+## Controlled Trace Test
+- `src/lib/observability/tracer.ts` provides the BookForge tracer.
+- `/api/telemetry/trace-test` creates a safe, content-free CHAIN span.
+- API response verified:
+  - `ok=true`
+  - `tracingEnabled=true`
+  - `spanCreated=true`
+  - trace ID `100844b382f6330133b87f42250c7f28`
+  - span ID `4d1da296b01062a7`
+- Phoenix ingestion / matching trace ID in UI: NOT YET VERIFIED.
 
 ## Trace Export
-Not initialized yet.
+Initialized and operational at the SDK level. End-to-end Phoenix ingestion is pending direct UI verification of the controlled test trace.
 
 ## Content Capture
-Not implemented; policy remains OFF by default.
+Disabled by default.
+- `BOOKFORGE_TRACE_CONTENT=false`
+- `BOOKFORGE_TRACE_USER_IDENTIFIERS=false`
+- Test span contains no manuscript, prompt, completion, title, author identity, API key, cookie, token, or Supabase service-role key.
 
 ## Verified Providers
 - [ ] LM Studio
@@ -99,13 +124,18 @@ Not implemented; policy remains OFF by default.
 - [ ] Auto Review
 - [ ] Retry/fallback
 
+## Gate Status
+- Gate 3A — Phoenix local backend: PASS
+- Gate 3B — telemetry bootstrap + fail-open: PASS
+- Gate 4 — first exported trace: PARTIAL PASS; span creation confirmed, Phoenix trace-ID match pending
+
 ## Known-Good Baseline
 The immutable rollback anchor is the pre-observability commit tagged `arize-baseline-verified`. The current feature branch begins after documentation-only commits that record baseline evidence and project memory.
 
 ## Next Action
-1. Commit `package.json` and `package-lock.json` as the dependency checkpoint.
-2. Pull this memory update locally after committing/pushing dependencies, resolving order safely if necessary.
-3. Add environment variables and Next.js `src/instrumentation.ts` plus Node-only telemetry initialization.
-4. Verify BookForge starts with Phoenix available.
-5. Verify BookForge starts with Phoenix unavailable (fail-open test).
-6. Re-run lint, tests and build before touching managed LLM calls.
+1. Pull latest documentation updates from `origin/feat/otel-foundation` after stopping the local dev server if necessary.
+2. In Phoenix UI, locate `bookforge.telemetry.trace-test`.
+3. Verify trace ID matches `100844b382f6330133b87f42250c7f28`.
+4. Verify safe diagnostic attributes are present and no content/secrets are captured.
+5. Re-run lint/build if any code changes occur.
+6. Once Gate 4 is PASS, begin manual OpenInference instrumentation of the managed LLM call path without OpenAI auto-instrumentation.
