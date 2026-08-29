@@ -162,10 +162,54 @@ The live LLM span exposed metadata/counts only. Phoenix did not show the raw pro
 ### Known-Good Managed LLM Checkpoint
 `298790a5d027ebec55f77c707b0dfe6ad2b11756`
 
+## 2026-08-29 — Phase 6 Cloud Provider Verification
+
+### OpenRouter Live Verification
+A second real Create Book → Concept request was run with BookForge configured for OpenRouter cloud execution.
+
+Phoenix trace evidence:
+- Real request trace: `POST /api/creation/concept`.
+- Manual child span: `bookforge.llm.planning`.
+- Phoenix classified the span as `llm`.
+- Span status: OK.
+- Observed span latency: approximately 13 seconds.
+- Trace independently showed the outbound provider request to `https://openrouter.ai/api/v1/...`.
+
+Verified semantic attributes:
+- `bookforge.task = planning`
+- `bookforge.provider = openrouter`
+- `bookforge.execution = cloud`
+- `bookforge.attempt = 1`
+- `bookforge.retry = false`
+- `bookforge.model.requested = anthropic/claude-haiku-4.5`
+- `bookforge.model.resolved = anthropic/claude-haiku-4.5`
+- `openinference.span.kind = LLM`
+- `llm.model_name = anthropic/claude-haiku-4.5`
+- `bookforge.message_count = 1`
+- `bookforge.input_chars = 1660`
+- `bookforge.estimated_input_tokens = 519`
+- `bookforge.max_output_tokens = 3500`
+- `bookforge.output_chars = 5378`
+- `bookforge.output_words = 713`
+- `llm.token_count.prompt = 468`
+- `llm.token_count.completion = 1280`
+- `llm.token_count.total = 1748`
+
+Verified event:
+- `provider.attempt`
+- `attempt = 1`
+- `model = anthropic/claude-haiku-4.5`
+
+This verifies that provider identity and served model identity are independent dimensions: the provider is OpenRouter, while the model identifier is in the Anthropic namespace. Attribution comes from BookForge configuration rather than the OpenAI-compatible transport class.
+
+### Cloud Provider Gate Status
+- OpenRouter provider verification: PASS
+- Cloud execution attribution: PASS
+- Cloud model attribution: PASS
+- Cloud token telemetry: PASS
+- Cloud provider-attempt event: PASS
+- Cloud parent/child trace correlation: PASS
+- Metadata-only privacy posture: PASS
+
 ### Next Gate
-Broaden verification without disturbing the known-good managed-call foundation:
-1. verify at least one real cloud provider path and provider attribution;
-2. verify retry/fallback event behavior when naturally reproducible or through a controlled test;
-3. add higher-level workflow/CHAIN spans around multi-call BookForge workflows;
-4. keep `createManagedChatCompletion()` as the provider-call LLM child-span boundary;
-5. preserve metadata-only privacy defaults and fail-open behavior.
+Verify the Critic workflow using the existing managed-call instrumentation, without changing the known-good LLM boundary. The Critic path uses `task=critic`, and its cloud retry logic can fall back to `google/gemini-2.5-flash` after an empty completion, making it a useful workflow and later fallback-verification target.
