@@ -1,7 +1,7 @@
 # BookForgeAI-Arize Implementation Memory
 
 ## Current Phase
-Phase 2 — Baseline verified
+Phase 3 — OpenTelemetry foundation branch active
 
 ## Canonical Local Path
 `/Users/rjulia/programs/BookForgeAI-Arize`
@@ -14,6 +14,15 @@ Phase 2 — Baseline verified
 
 ## Zero-Point Commit
 `3e9c54c79799530be15569a4e9fd83488f021604`
+
+## Immutable Baseline Tag
+`arize-baseline-verified` → `3e9c54c79799530be15569a4e9fd83488f021604`
+
+## Current Branch
+`feat/otel-foundation`
+
+## Branch Start Commit
+`0bbc3bec1a371fe58e15bee089db218d736bb888`
 
 ## Baseline Toolchain
 - Node.js: v24.15.0
@@ -28,6 +37,7 @@ Phase 2 — Baseline verified
 - npm ci: PASS
 - npm audit: 0 vulnerabilities
 - npm run build: PASS
+- npm run lint: PASS
 - npm test: PASS
 - Test files: 109 passed / 109
 - Tests: 453 passed / 453
@@ -70,5 +80,13 @@ Disabled / not implemented.
 - [ ] Auto Review
 - [ ] Retry/fallback
 
+## Known-Good Baseline
+The immutable rollback anchor is the pre-observability commit tagged `arize-baseline-verified`. The current feature branch begins after two documentation-only commits that record baseline evidence and project memory.
+
 ## Next Action
-Complete the remaining baseline gate with `npm run lint`, create the immutable baseline tag, then begin the `feat/otel-foundation` branch and Phoenix/OpenTelemetry foundation.
+1. Pull this updated memory commit locally.
+2. Verify Docker availability.
+3. Start Arize Phoenix locally.
+4. Verify Phoenix UI and OTLP ports.
+5. Install only the OpenTelemetry/OpenInference foundation dependencies.
+6. Re-run lint, tests and build before adding instrumentation code.
