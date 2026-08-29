@@ -1,7 +1,7 @@
 # BookForgeAI-Arize Implementation Memory
 
 ## Current Phase
-Phase 5 — first end-to-end Phoenix trace verified; ready for real managed LLM instrumentation
+Phase 6 — managed LLM tracing verified end to end; ready for cloud-provider and workflow tracing expansion
 
 ## Canonical Local Path
 `/Users/rjulia/programs/BookForgeAI-Arize`
@@ -61,16 +61,18 @@ These warnings existed before any Arize/OpenTelemetry/OpenInference changes and 
 - Verified Phoenix project: `bookforge-ai-arize`
 
 ## OpenTelemetry / OpenInference
-Resolved foundation versions initially included:
+Resolved foundation versions:
 - `@opentelemetry/api`: 1.9.1
 - `@opentelemetry/sdk-node`: 0.221.0
+- `@opentelemetry/exporter-trace-otlp-proto`: 0.221.0 direct exporter
 - `@opentelemetry/resources`: 2.10.0
 - `@opentelemetry/semantic-conventions`: 1.43.0
 - `@arizeai/openinference-semantic-conventions`: 2.8.0
 
 Important transport lesson:
 - `@opentelemetry/exporter-trace-otlp-http` reached Phoenix but produced `415 Unsupported Media Type` on `/v1/traces` in this setup.
-- Phoenix ingestion requires the OTLP HTTP/Protobuf transport for this endpoint; the exporter dependency/import should therefore use the `-proto` package before the foundation checkpoint is finalized.
+- The corrected direct exporter is `@opentelemetry/exporter-trace-otlp-proto`, using OTLP HTTP/Protobuf to `http://localhost:6006/v1/traces`.
+- Exporter correction commit: `16e440e`.
 
 ## Telemetry Bootstrap
 - `src/instrumentation.ts`: Node-runtime-only dynamic import.
@@ -85,34 +87,105 @@ Important transport lesson:
 ## Controlled Trace Test
 - `src/lib/observability/tracer.ts` provides the BookForge tracer.
 - `/api/telemetry/trace-test` creates a safe, content-free CHAIN span.
-- API response verified with real trace/span IDs.
-- Phoenix UI now visibly shows:
-  - project `bookforge-ai-arize`
-  - surrounding Next.js request/route spans
-  - manual child span `bookforge.telemetry.trace-test`
-- Context propagation is therefore proven end to end.
+- Phoenix UI visibly shows project `bookforge-ai-arize`, surrounding Next.js request/route spans, and manual child span `bookforge.telemetry.trace-test`.
+- Context propagation is proven end to end.
 - Gate 4 first exported trace: PASS.
 
-## Trace Export
-Operational end to end: BookForge → OpenTelemetry API → NodeSDK → OTLP → Phoenix.
+## Managed LLM Tracing Architecture
+Key commits:
+- `84b7437` — privacy-safe OpenInference LLM span foundation.
+- `504b821` — provider-aware LLM telemetry context.
+- `298790a5d027ebec55f77c707b0dfe6ad2b11756` — trace managed LLM calls with OpenInference.
 
-## Content Capture
+`createManagedChatCompletion()` is the managed provider-call chokepoint.
+
+The logical flow is now:
+
+BookForge route/workflow → model selection → provider-aware telemetry context → `withBookForgeLlmSpan()` → provider invocation → existing BookForge outcome/cost/reconciliation telemetry.
+
+The wrapper preserves existing BookForge semantics:
+- credit reservation remains before cloud provider invocation;
+- the deprecated-temperature retry remains the same logical request;
+- existing `recordModelCallEvent()` behavior remains intact;
+- credit reconciliation remains intact;
+- tracing failures remain fail-open;
+- original provider/model errors remain authoritative;
+- raw prompt/completion capture remains off.
+
+## Provider Attribution
+Provider identity comes from BookForge configuration, not from the OpenAI SDK transport class.
+
+Supported semantic mapping:
+- LM Studio → `provider=lmstudio`, `execution=local`
+- OpenAI → `provider=openai`, `execution=cloud`
+- Anthropic → `provider=anthropic`, `execution=cloud`
+- Google → `provider=google`, `execution=cloud`
+- OpenRouter → `provider=openrouter`, `execution=cloud`
+
+This is required because BookForge intentionally uses OpenAI-compatible transport semantics for multiple providers.
+
+## Live Managed LLM Verification
+Verified using the real Create Book → Concept path:
+
+`POST /api/creation/concept` → task `planning` → managed model selection → `createManagedChatCompletion()` → local LM Studio.
+
+Phoenix showed a real nested child span:
+- span name: `bookforge.llm.planning`
+- Phoenix kind: `llm`
+- status: OK
+- approximate latency: 36.5 s
+- parent trace: real `POST /api/creation/concept` request
+
+Verified semantic attributes:
+- `bookforge.task = planning`
+- `bookforge.provider = lmstudio`
+- `bookforge.execution = local`
+- `bookforge.attempt = 1`
+- `bookforge.retry = false`
+- `bookforge.model.requested = qwen/qwen3.6-35b-a3b`
+- `bookforge.model.resolved = qwen/qwen3.6-35b-a3b`
+- `openinference.span.kind = LLM`
+- `llm.model_name = qwen/qwen3.6-35b-a3b`
+
+Verified usage/size attributes:
+- `bookforge.message_count = 1`
+- `bookforge.input_chars = 1660`
+- `bookforge.estimated_input_tokens = 519`
+- `bookforge.max_output_tokens = 3500`
+- `bookforge.output_chars = 1518`
+- `bookforge.output_words = 231`
+- `llm.token_count.prompt = 439`
+- `llm.token_count.completion = 3499`
+- `llm.token_count.total = 3938`
+
+Verified event:
+- `provider.attempt`
+- `attempt = 1`
+- `model = qwen/qwen3.6-35b-a3b`
+
+## Trace Export
+Operational end to end:
+BookForge → OpenTelemetry API → NodeSDK → OTLP HTTP/Protobuf → Phoenix project `bookforge-ai-arize`.
+
+## Content Capture / Privacy
 Disabled by default.
 - `BOOKFORGE_TRACE_CONTENT=false`
 - `BOOKFORGE_TRACE_USER_IDENTIFIERS=false`
-- Diagnostic span contains no manuscript, prompt, completion, title, author identity, API key, cookie, token, or Supabase service-role key.
+- Live managed LLM span showed metadata/counts only.
+- Phoenix input/output columns for the custom LLM span did not display raw prompt or generated completion.
+- No custom attribute/event contained manuscript content, book title, author identity, user ID, API key, cookie, bearer token, or Supabase credential.
 
 ## Verified Providers
-- [ ] LM Studio
+- [x] LM Studio — real managed `planning` call verified in Phoenix
 - [ ] OpenAI
 - [ ] Anthropic
 - [ ] Google
 - [ ] OpenRouter
 
 ## Verified Workflows
-- [ ] Simple managed completion
+- [x] Simple managed completion / managed-call boundary
 - [ ] Critic
-- [ ] Creation
+- [x] Creation — Concept planning path verified
 - [ ] Rewrite
 - [ ] Auto Review
 - [ ] Retry/fallback
@@ -121,13 +194,19 @@ Disabled by default.
 - Gate 3A — Phoenix local backend: PASS
 - Gate 3B — telemetry bootstrap + fail-open: PASS
 - Gate 4 — first exported trace: PASS
+- Gate 5A — privacy-safe LLM span foundation: PASS
+- Gate 5B — provider-aware telemetry context: PASS
+- Gate 5C — real managed LLM trace: PASS
 
-## Known-Good Baseline
-The immutable rollback anchor is the pre-observability commit tagged `arize-baseline-verified`. The current feature branch begins after documentation-only commits that record baseline evidence and project memory.
+## Known-Good Checkpoints
+- Immutable pre-observability rollback anchor: `arize-baseline-verified` → `3e9c54c79799530be15569a4e9fd83488f021604`
+- Verified managed LLM instrumentation checkpoint: `298790a5d027ebec55f77c707b0dfe6ad2b11756`
 
 ## Next Action
-1. Finalize the local exporter dependency/import on OTLP HTTP/Protobuf and run lint/tests/build.
-2. Commit/push that corrected foundation checkpoint.
-3. Begin manual OpenInference instrumentation of `createManagedChatCompletion()` without OpenAI SDK auto-instrumentation.
-4. Preserve BookForge-native provider attribution (`lmstudio`, `openai`, `anthropic`, `google`, `openrouter`) and local/cloud execution semantics.
-5. Keep raw content and user identifiers disabled by default.
+1. Keep the verified managed-call boundary stable.
+2. Verify one real cloud-provider call in Phoenix and confirm BookForge-native provider attribution plus `execution=cloud`.
+3. Verify retry/fallback event behavior through a controlled or naturally reproducible path without changing billing semantics.
+4. Add higher-level CHAIN/workflow spans so multi-call operations show parent/child structure above individual LLM spans.
+5. Expand workflow verification to Critic, Rewrite, and Auto Review.
+6. Preserve metadata-only privacy defaults and fail-open behavior.
+7. After broader local Phoenix verification, prove the same OTLP design against Arize AX and keep the exporter backend-neutral for future Dynatrace targeting.
