@@ -1,5 +1,5 @@
 import { SEMRESATTRS_PROJECT_NAME } from "@arizeai/openinference-semantic-conventions";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import {
@@ -9,7 +9,6 @@ import {
 
 declare global {
   // Prevent duplicate SDK initialization during development reloads.
-  // eslint-disable-next-line no-var
   var __bookforgeOtelStarted: boolean | undefined;
 }
 
