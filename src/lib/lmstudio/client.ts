@@ -1,6 +1,11 @@
 import OpenAI from "openai";
 import type { LmStudioSettings, LmStudioTaskKind } from "@/lib/types";
 export type { LmStudioTaskKind } from "@/lib/types";
+import type {
+  BookForgeLlmExecution,
+  BookForgeLlmProvider,
+} from "@/lib/observability/llm-span";
+import { withBookForgeLlmSpan } from "@/lib/observability/llm-span";
 import {
   getLmStudioContextErrorMessage,
   getLmStudioRuntimeLimits,
@@ -63,7 +68,16 @@ export type PreparedLmStudioModel = {
  * into a jsonb column (job settings) — embedding a client reference there would
  * make it non-serializable.
  */
-export type ModelCallTelemetryContext = ModelCallTelemetry & { task: string; model: string };
+export type ModelCallTelemetryContext = ModelCallTelemetry & {
+  task: string;
+  model: string;
+  provider?: BookForgeLlmProvider;
+  execution?: BookForgeLlmExecution;
+  requestedModel?: string;
+  workflow?: string;
+  attempt?: number;
+  retry?: boolean;
+};
 
 export function createLmStudioClient(settings?: Partial<LmStudioSettings>) {
   return new OpenAI({
@@ -306,84 +320,160 @@ export async function createManagedChatCompletion(
     });
   }
 
-  try {
-    const paramsWithoutTopP = Object.fromEntries(
-      Object.entries(params).filter(([key]) => key !== "top_p"),
-    ) as typeof params;
-    const safeParams = prepared.isCloud ? paramsWithoutTopP : params;
-    const completion = await client.chat.completions.create(
-      {
-        ...safeParams,
-        model: resolvedModel,
-        // Trust an explicitly-passed max_tokens as-is; only fall back to the
-        // prepared/account default when the caller didn't specify one. The
-        // previous Math.min(params.max_tokens || default, default) is
-        // mathematically always equal to `default` whenever a caller passes
-        // anything larger than it — silently discarding every explicit
-        // request for more output, for every call site in the codebase. This
-        // is what made a book architecture's own increased max_tokens budget
-        // a no-op: it always got re-clamped back down to the account's
-        // general cloud max-output setting (tuned for per-paragraph rewrite
-        // calls), regardless of what the architecture route asked for.
-        max_tokens: maxOutputTokens,
-      },
-      requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
-    );
-    void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
-    return completion;
-  } catch (error) {
-    // Backstop path: the internal ledger reservation above is the primary
-    // gate now, so this should be rare -- e.g. the ledger under-collected
-    // relative to real OpenRouter cost, or the key's own limit tripped for
-    // some other reason. Map it into the same InsufficientCreditsError the
-    // internal ledger throws, so it flows through the already-shipped
-    // isInsufficientCreditsMessage /
-    // InsufficientCreditsAlert UI with no separate UI work needed. Checked
-    // first: retrying (below) can't help an exhausted key.
-    if (prepared.isManagedOpenRouterKey && isOpenRouterKeyLimitExceededError(error)) {
-      throw new InsufficientCreditsError(resolvedModel, "Your OpenRouter key's spending limit for this billing period is used up.");
-    }
+  if (!telemetryContext) {
+    return executeManagedChatCompletion();
+  }
 
-    if (isDeprecatedTemperatureError(error) && "temperature" in params) {
-      const paramsWithoutTemperature = Object.fromEntries(
-        Object.entries(params).filter(([key]) => key !== "temperature"),
-      ) as typeof params;
+  return withBookForgeLlmSpan(
+    {
+      task: telemetryContext.task,
+      model: resolvedModel,
+      provider: telemetryContext.provider,
+      execution: telemetryContext.execution,
+      requestedModel: telemetryContext.requestedModel,
+      workflow: telemetryContext.workflow,
+      attempt: telemetryContext.attempt ?? 1,
+      retry: telemetryContext.retry ?? false,
+    },
+    async (llmSpan) => executeManagedChatCompletion(llmSpan),
+    {
+      messageCount: params.messages.length,
+      inputChars: params.messages.reduce(
+        (sum, message) =>
+          sum +
+          (typeof message.content === "string"
+            ? message.content.length
+            : JSON.stringify(message.content ?? "").length),
+        0,
+      ),
+      estimatedInputTokens: estimatePromptTokens(params.messages),
+      maxOutputTokens,
+    },
+  );
+
+  async function executeManagedChatCompletion(
+    llmSpan?: {
+      addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
+      setResult(metrics: {
+        promptTokens?: number;
+        completionTokens?: number;
+        totalTokens?: number;
+        outputChars?: number;
+        outputWords?: number;
+        resolvedModel?: string;
+      }): void;
+    },
+  ) {
+    try {
       const paramsWithoutTopP = Object.fromEntries(
-        Object.entries(paramsWithoutTemperature).filter(([key]) => key !== "top_p"),
-      ) as typeof paramsWithoutTemperature;
-      const safeRetryParams = prepared.isCloud ? paramsWithoutTopP : paramsWithoutTemperature;
-
+        Object.entries(params).filter(([key]) => key !== "top_p"),
+      ) as typeof params;
+      const safeParams = prepared.isCloud ? paramsWithoutTopP : params;
+      llmSpan?.addEvent("provider.attempt", {
+        attempt: 1,
+        model: resolvedModel,
+      });
       const completion = await client.chat.completions.create(
         {
-          ...safeRetryParams,
+          ...safeParams,
           model: resolvedModel,
+          // Trust an explicitly-passed max_tokens as-is; only fall back to the
+          // prepared/account default when the caller didn't specify one. The
+          // previous Math.min(params.max_tokens || default, default) is
+          // mathematically always equal to `default` whenever a caller passes
+          // anything larger than it — silently discarding every explicit
+          // request for more output, for every call site in the codebase. This
+          // is what made a book architecture's own increased max_tokens budget
+          // a no-op: it always got re-clamped back down to the account's
+          // general cloud max-output setting (tuned for per-paragraph rewrite
+          // calls), regardless of what the architecture route asked for.
           max_tokens: maxOutputTokens,
         },
         requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
       );
+      const content = completion.choices[0]?.message.content || "";
+      llmSpan?.setResult({
+        resolvedModel: completion.model || resolvedModel,
+        promptTokens: completion.usage?.prompt_tokens,
+        completionTokens: completion.usage?.completion_tokens,
+        totalTokens: completion.usage?.total_tokens,
+        outputChars: content.length,
+        outputWords: content.trim()
+          ? content.trim().split(/\s+/).filter(Boolean).length
+          : 0,
+      });
       void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
       return completion;
-    }
+    } catch (error) {
+      // Backstop path: the internal ledger reservation above is the primary
+      // gate now, so this should be rare -- e.g. the ledger under-collected
+      // relative to real OpenRouter cost, or the key's own limit tripped for
+      // some other reason. Map it into the same InsufficientCreditsError the
+      // internal ledger throws, so it flows through the already-shipped
+      // isInsufficientCreditsMessage /
+      // InsufficientCreditsAlert UI with no separate UI work needed. Checked
+      // first: retrying (below) can't help an exhausted key.
+      if (prepared.isManagedOpenRouterKey && isOpenRouterKeyLimitExceededError(error)) {
+        throw new InsufficientCreditsError(resolvedModel, "Your OpenRouter key's spending limit for this billing period is used up.");
+      }
 
-    if (telemetryContext) {
-      const { outcome, signature } = classifyLmStudioError(error);
-      void recordModelCallEvent(telemetryContext.supabase, {
-        userId: telemetryContext.userId,
-        // No response came back to read the real model from -- the best
-        // available signal is what this attempt actually requested.
-        model: params.model || telemetryContext.model,
-        task: telemetryContext.task,
-        contextLength: prepared.runtimeLimits.configuredContextTokens,
-        outcome,
-        errorSignature: signature,
-        durationMs: Date.now() - startedAt,
-      });
-    }
+      if (isDeprecatedTemperatureError(error) && "temperature" in params) {
+        const paramsWithoutTemperature = Object.fromEntries(
+          Object.entries(params).filter(([key]) => key !== "temperature"),
+        ) as typeof params;
+        const paramsWithoutTopP = Object.fromEntries(
+          Object.entries(paramsWithoutTemperature).filter(([key]) => key !== "top_p"),
+        ) as typeof paramsWithoutTemperature;
+        const safeRetryParams = prepared.isCloud ? paramsWithoutTopP : paramsWithoutTemperature;
 
-    if (isLmStudioContextError(error)) {
-      throw new Error(getLmStudioContextErrorMessage(error, prepared.runtimeLimits));
+        llmSpan?.addEvent("provider.retry", {
+          attempt: 2,
+          reason: "deprecated_temperature",
+          model: resolvedModel,
+        });
+        const completion = await client.chat.completions.create(
+          {
+            ...safeRetryParams,
+            model: resolvedModel,
+            max_tokens: maxOutputTokens,
+          },
+          requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
+        );
+        const retryContent = completion.choices[0]?.message.content || "";
+        llmSpan?.setResult({
+          resolvedModel: completion.model || resolvedModel,
+          promptTokens: completion.usage?.prompt_tokens,
+          completionTokens: completion.usage?.completion_tokens,
+          totalTokens: completion.usage?.total_tokens,
+          outputChars: retryContent.length,
+          outputWords: retryContent.trim()
+            ? retryContent.trim().split(/\s+/).filter(Boolean).length
+            : 0,
+        });
+        void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
+        return completion;
+      }
+
+      if (telemetryContext) {
+        const { outcome, signature } = classifyLmStudioError(error);
+        void recordModelCallEvent(telemetryContext.supabase, {
+          userId: telemetryContext.userId,
+          // No response came back to read the real model from -- the best
+          // available signal is what this attempt actually requested.
+          model: params.model || telemetryContext.model,
+          task: telemetryContext.task,
+          contextLength: prepared.runtimeLimits.configuredContextTokens,
+          outcome,
+          errorSignature: signature,
+          durationMs: Date.now() - startedAt,
+        });
+      }
+
+      if (isLmStudioContextError(error)) {
+        throw new Error(getLmStudioContextErrorMessage(error, prepared.runtimeLimits));
+      }
+      throw error;
     }
-    throw error;
   }
 }
 

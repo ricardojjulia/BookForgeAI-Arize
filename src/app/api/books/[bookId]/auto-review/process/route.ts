@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { withBookForgeWorkflowSpan } from "@/lib/observability/workflow-span";
 
 const schema = z.object({
   jobId: z.string().uuid(),
@@ -662,8 +663,25 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     currentStage = currentJob.current_stage || "analyze";
 
-    let stageIndex = 0;
-    while (stageIndex < stageOrder.length) {
+    const workflowResult = await withBookForgeWorkflowSpan(
+      {
+        workflow: "auto-review",
+        operation: "stage-orchestration",
+        unitCount: stageOrder.length,
+      },
+      async (workflowSpan) => {
+        workflowSpan.setAttributes({
+          "bookforge.auto_review.start_stage": currentStage,
+        });
+
+        workflowSpan.addEvent("auto-review.invocation.start", {
+          "auto-review.iteration": currentIteration,
+          "auto-review.total_stages": stageOrder.length,
+          "auto-review.start_stage": currentStage,
+        });
+
+        let stageIndex = 0;
+        while (stageIndex < stageOrder.length) {
       const stage = stageOrder[stageIndex];
       if (stageStatus.has(stageStatusKey(stage, currentIteration))) {
         stageIndex += 1;
@@ -830,6 +848,20 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         return NextResponse.json({ ok: true, jobId: body.jobId, checkpointed: true, nextStage: stageOrder[stageIndex] });
       }
     }
+
+        workflowSpan.setAttributes({
+          "bookforge.auto_review.iteration": currentIteration,
+          "bookforge.auto_review.completed_stages": stageStatus.size,
+          "bookforge.auto_review.end_stage": currentStage,
+        });
+
+        workflowSpan.addEvent("auto-review.invocation.complete", {
+          "auto-review.iteration": currentIteration,
+          "auto-review.completed_stages": stageStatus.size,
+        });
+      },
+    );
+    if (workflowResult) return workflowResult;
 
     await updateJob({
       completed: true,

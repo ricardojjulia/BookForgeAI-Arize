@@ -120,7 +120,14 @@ export async function selectAndPrepareLmStudioModel(
     modelHealth: getHealthFor(health, selected.healthKey),
   });
   const telemetryContext: ModelCallTelemetryContext | undefined = profile.telemetry
-    ? { ...profile.telemetry, task: profile.task, model: preparedModel.model || selected.model }
+    ? {
+        ...profile.telemetry,
+        task: profile.task,
+        model: preparedModel.model || selected.model,
+        provider: "lmstudio",
+        execution: "local",
+        requestedModel: selected.model,
+      }
     : undefined;
   const unloadedInstances =
     profile.allowUnload && (profile.expectedCalls || 0) >= 3
@@ -407,7 +414,14 @@ export async function selectAndPrepareActiveModel(
       unloadedInstances: [],
     };
     const telemetryContext: ModelCallTelemetryContext | undefined = profile.telemetry
-      ? { ...profile.telemetry, task: profile.task, model }
+      ? {
+          ...profile.telemetry,
+          task: profile.task,
+          model,
+          provider: std.provider,
+          execution: "cloud",
+          requestedModel: taskModel || std.model || model,
+        }
       : undefined;
     return {
       client: createProviderClient(std),

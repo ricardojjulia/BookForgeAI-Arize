@@ -5,6 +5,14 @@ const { mockCreateClient } = vi.hoisted(() => ({
   mockCreateClient: vi.fn(),
 }));
 
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return {
+    ...actual,
+    after: vi.fn((callback: () => void) => callback()),
+  };
+});
+
 vi.mock("@/lib/supabase/server", () => ({
   createClient: mockCreateClient,
 }));
@@ -879,6 +887,113 @@ describe("POST /api/books/[bookId]/auto-review/process", () => {
       expect(jobsPollCalls).toBeGreaterThan(0);
     } finally {
       vi.useRealTimers();
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("returns checkpoint responses without marking the whole auto-review job completed", async () => {
+    const completedStages = [
+      "analyze",
+      "summarize",
+      "critic_baseline:story_structure",
+      "critic_baseline:prose_quality",
+      "critic_baseline:continuity",
+      "critic_baseline:character_depth",
+      "critic_baseline:market_fit",
+      "critic_baseline:contemporary_view",
+      "critic_baseline:revision_priorities",
+      "critic_baseline:dialogue_density",
+      "rewrite_plan",
+    ];
+
+    const initialJob = {
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "running",
+      current_stage: "rewrite_execute",
+      stages_completed: completedStages,
+      iteration: 0,
+      config: null,
+      log: [],
+      error: null,
+      export_id: null,
+      created_at: new Date().toISOString(),
+      completed_at: null,
+    };
+
+    const updatePayloads: Record<string, unknown>[] = [];
+    const updateMock = vi.fn((payload: Record<string, unknown>) => {
+      updatePayloads.push(payload);
+      return { eq: vi.fn(async () => ({ error: null })) };
+    });
+
+    const from = vi.fn((table: string) => {
+      if (table === "auto_review_jobs") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  single: vi.fn(async () => ({ data: initialJob, error: null })),
+                })),
+                single: vi.fn(async () => ({ data: initialJob, error: null })),
+              })),
+            })),
+          })),
+          update: updateMock,
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    });
+
+    mockCreateClient.mockResolvedValue({
+      auth: {
+        getUser: vi.fn(async () => ({ data: { user: { id: "user-1" } } })),
+      },
+      from,
+    });
+
+    let now = 0;
+    const dateNowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const fetchSpy = vi.spyOn(global, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const payload = init?.body ? JSON.parse(String(init.body)) : {};
+
+      if (url.includes("/rewrite-execute") && payload.serverManaged) {
+        now = 701_000;
+        return new Response(JSON.stringify({ content: { jobId: "rewrite-job-1" } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (url.includes("/auto-review/process")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+
+      throw new Error(`Unexpected fetch call: ${url} ${JSON.stringify(payload)}`);
+    });
+
+    try {
+      const response = await POST(
+        new Request("http://localhost/api/books/book-1/auto-review/process", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jobId: "11111111-1111-4111-8111-111111111111",
+            mode: "full_review",
+          }),
+        }),
+        { params: Promise.resolve({ bookId: "book-1" }) },
+      );
+
+      const payload = await response.json();
+      expect(response.status, JSON.stringify(payload)).toBe(200);
+      expect(payload.checkpointed).toBe(true);
+      expect(payload.nextStage).toBe("rewrite_execute");
+      expect(updatePayloads).not.toContainEqual(expect.objectContaining({ status: "completed" }));
+      expect(updatePayloads).not.toContainEqual(expect.objectContaining({ completed_at: expect.any(String) }));
+    } finally {
+      dateNowSpy.mockRestore();
       fetchSpy.mockRestore();
     }
   });

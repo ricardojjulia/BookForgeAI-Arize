@@ -8,6 +8,7 @@ import { parseModelJsonOrFallback } from "@/lib/lmstudio/json";
 import { getDraftModelCandidates } from "@/lib/lmstudio/model-selection";
 import { selectAndPrepareActiveModel } from "@/lib/lmstudio/orchestrator";
 import { getUserLmStudioSettings } from "@/lib/lmstudio/settings";
+import { withBookForgeWorkflowSpan } from "@/lib/observability/workflow-span";
 import { buildFullBookRewriteUnitPrompt } from "@/lib/prompts/builders";
 import { buildRewriteContextPacket } from "@/lib/rewrite/context-packet";
 import { applyRewritePlanDefaults } from "@/lib/rewrite/plan-defaults";
@@ -196,7 +197,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         .order("chapter_number"),
       supabase
         .from("revision_versions")
-        .select("paragraph_id,accepted,rejected")
+        .select("paragraph_id,accepted,rejected,revision_job_id")
         .eq("book_id", bookId)
         .not("paragraph_id", "is", null),
       supabase
@@ -447,6 +448,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const anyRevisionParagraphIds = new Set(
       ((existingRevisions || []) as ExistingRevisionRow[]).map((revision) => revision.paragraph_id).filter(Boolean),
     );
+    const currentJobDraftParagraphIds = new Set(
+      ((existingRevisions || []) as ExistingRevisionRow[])
+        .filter((revision) => revision.revision_job_id === jobId)
+        .map((revision) => revision.paragraph_id)
+        .filter(Boolean),
+    );
     const retryParagraphIds = body.retryJobId ? await getRetryParagraphIds(supabase, body.retryJobId) : null;
     // Paragraphs that already exhausted their retry budget (see maxCompletionAttempts
     // below) earlier in THIS SAME job. Without this exclusion, a paragraph that's
@@ -503,6 +510,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         }
         if (paragraph.is_locked || (!body.forceTinyParagraphs && shouldSkipParagraph(paragraph.original_text, chapter.title))) {
           skipped += 1;
+          continue;
+        }
+        if (currentJobDraftParagraphIds.has(paragraph.id)) {
+          skipped += 1;
+          skippedExistingDrafts += 1;
           continue;
         }
         if (!body.rewriteExistingDrafts && pendingDraftParagraphIds.has(paragraph.id)) {
@@ -664,7 +676,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
               ...(useFallbackModel ? { model: REWRITE_FALLBACK_MODEL } : {}),
             },
             undefined,
-            telemetryContext,
+            telemetryContext
+              ? {
+                  ...telemetryContext,
+                  attempt: completionAttempt,
+                  retry: completionAttempt > 1,
+                }
+              : undefined,
             { timeoutMs: REWRITE_UNIT_COMPLETION_TIMEOUT_MS },
           );
         } catch (completionError) {
@@ -773,7 +791,40 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             failed,
             skipped,
           });
-          const settled = await Promise.allSettled(claimedChunk.map((unit) => runUnit(unit)));
+          const settled = await withBookForgeWorkflowSpan(
+            {
+              workflow: "rewrite",
+              operation: "paragraph-chunk",
+              unitCount: claimedChunk.length,
+            },
+            async (workflowSpan) => {
+              workflowSpan.addEvent("rewrite.chunk.start", {
+                "rewrite.unit_count": claimedChunk.length,
+              });
+
+              const results = await Promise.allSettled(
+                claimedChunk.map((unit) => runUnit(unit)),
+              );
+
+              const fulfilled = results.filter(
+                (result) => result.status === "fulfilled",
+              ).length;
+
+              workflowSpan.setAttributes({
+                "bookforge.workflow.fulfilled_calls": fulfilled,
+                "bookforge.workflow.rejected_calls":
+                  results.length - fulfilled,
+                "bookforge.rewrite.strategy": rewriteStrategy.id,
+              });
+
+              workflowSpan.addEvent("rewrite.chunk.complete", {
+                "rewrite.fulfilled_calls": fulfilled,
+                "rewrite.rejected_calls": results.length - fulfilled,
+              });
+
+              return results;
+            },
+          );
           heartbeat.stop();
           await logDiag("diag_settled_resolved", `results=${settled.length}`);
 

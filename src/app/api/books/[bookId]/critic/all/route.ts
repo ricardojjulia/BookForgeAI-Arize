@@ -6,6 +6,7 @@ import { criticLenses } from "@/lib/critic/prompts";
 import { preloadCriticModelExecution, preloadCriticRunContext, runCriticLens } from "@/lib/critic/run";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
 import { bookHasDraftedParagraphs, UNDRAFTED_MANUSCRIPT_ERROR } from "@/lib/manuscript/draft-guard";
+import { withBookForgeWorkflowSpan } from "@/lib/observability/workflow-span";
 import { createClient } from "@/lib/supabase/server";
 import type { CriticLens } from "@/lib/types";
 
@@ -175,18 +176,49 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const settled =
       preDispatchStatus === "cancelled"
         ? []
-        : await Promise.allSettled(
-            lenses.map((lens) =>
-              runCriticLens({
-                supabase,
-                bookId,
-                userId: user.id,
-                lens,
-                stage: batchStage,
-                preloadedContext,
-                modelExecution,
-              }),
-            ),
+        : await withBookForgeWorkflowSpan(
+            {
+              workflow: "critic",
+              operation: "all-lenses",
+              stage: batchStage,
+              unitCount: lenses.length,
+            },
+            async (workflowSpan) => {
+              workflowSpan.addEvent("critic.batch.start", {
+                "critic.lens_count": lenses.length,
+              });
+
+              const results = await Promise.allSettled(
+                lenses.map((lens) =>
+                  runCriticLens({
+                    supabase,
+                    bookId,
+                    userId: user.id,
+                    lens,
+                    stage: batchStage,
+                    preloadedContext,
+                    modelExecution,
+                  }),
+                ),
+              );
+
+              const successful = results.filter(
+                (result) => result.status === "fulfilled",
+              ).length;
+
+              workflowSpan.setAttributes({
+                "bookforge.workflow.successful_units": successful,
+                "bookforge.workflow.failed_units":
+                  results.length - successful,
+              });
+
+              workflowSpan.addEvent("critic.batch.complete", {
+                "critic.successful_lenses": successful,
+                "critic.failed_lenses": results.length - successful,
+              });
+
+              return results;
+            },
           );
     heartbeat.stop();
 
