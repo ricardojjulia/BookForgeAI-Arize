@@ -249,5 +249,104 @@ The selected span also exposed a single provider-attempt event. No raw manuscrip
 - Critic provider-attempt event: PASS
 - Metadata-only privacy posture: PASS
 
-### Next Gate
-Add a higher-level Critic workflow/CHAIN span so the eight individual `bookforge.llm.critic` child spans are grouped under one semantic BookForge workflow span, then expand the same pattern to Rewrite and Auto Review. Retry/fallback behavior remains a separate later gate.
+## 2026-08-29 — Phase 7B Critic Workflow CHAIN
+
+### Implementation
+- Added reusable fail-open workflow wrapper `withBookForgeWorkflowSpan()`.
+- Critic all-lenses route wraps the concurrent eight-lens batch in `bookforge.workflow.critic`.
+- Commit: `bf06abbc7fd76c1c9fbbe318dc9343cdd523b802` — `feat: trace Critic workflow with OpenInference chain span`.
+
+### Phoenix Verification
+A real eight-lens Critic run showed one semantic workflow parent with all eight LLM spans nested beneath it.
+
+Verified parent attributes:
+- `bookforge.workflow = critic`
+- `bookforge.workflow.operation = all-lenses`
+- `bookforge.workflow.stage = baseline`
+- `bookforge.workflow.unit_count = 8`
+- `bookforge.workflow.successful_units = 8`
+- `bookforge.workflow.failed_units = 0`
+- `openinference.span.kind = CHAIN`
+
+The workflow span exposed two batch events and the eight `bookforge.llm.critic` spans remained individually visible as LLM children.
+
+### Gate Status
+- Gate 7B — Critic workflow CHAIN hierarchy: PASS
+- Eight-child LLM correlation: PASS
+- Workflow success/failure aggregation: PASS
+
+## 2026-08-29 — Phase 7C Rewrite Workflow CHAIN
+
+### Implementation
+- Rewrite execution wraps each chapter-bounded concurrent paragraph chunk with `bookforge.workflow.rewrite`.
+- Commit: `53c4e6139ab913fc4787cde869cb6c2a73aaa437` — `feat: trace Rewrite chunks with OpenInference chain spans`.
+
+### Phoenix Verification
+A real chapter rewrite produced a five-unit workflow batch.
+
+Verified parent attributes:
+- `bookforge.workflow = rewrite`
+- `bookforge.workflow.operation = paragraph-chunk`
+- `bookforge.workflow.unit_count = 5`
+- `bookforge.workflow.fulfilled_calls = 5`
+- `bookforge.workflow.rejected_calls = 0`
+- `bookforge.rewrite.strategy = humanized_literary`
+- `openinference.span.kind = CHAIN`
+
+Five `bookforge.llm.rewrite` LLM spans were visibly nested beneath the workflow parent, and outbound OpenRouter requests remained visible.
+
+### Gate Status
+- Gate 7C — Rewrite workflow CHAIN: PASS
+- Five concurrent child LLM spans: PASS
+- Rewrite strategy metadata: PASS
+- Batch success/failure aggregation: PASS
+
+## 2026-08-29 — Phase 8A Auto Review Orchestration CHAIN
+
+### Implementation
+- Auto Review stage orchestration is wrapped per worker invocation in `bookforge.workflow.auto-review`.
+- The wrapper is intentionally per invocation; a logical Auto Review can checkpoint and self-invoke again, so one logical job can have multiple workflow spans until explicit cross-invocation correlation is added later.
+- Initial instrumentation exposed a control-flow regression: checkpoint responses returned from inside the workflow callback but the outer route ignored the callback result and continued to mark the job completed.
+- The route now captures `workflowResult` and returns it before the final completion update.
+- A regression test was added proving a checkpoint response does not mark the whole Auto Review job completed.
+- Start/end stage semantics were refined to `bookforge.auto_review.start_stage` and `bookforge.auto_review.end_stage` rather than treating the span's initial stage as a timeless current-stage value.
+- Commit: `7a13c84` — `feat: trace Auto Review orchestration with OpenInference chain`.
+
+### Behavioral Verification
+- A previously corrupted local Auto Review row was repaired to a failed/resumable state at `rewrite_execute`.
+- The wizard resumed from the failed step while preserving prior completed work.
+- The resumed workflow proceeded through remaining rewrite/post-critic work and completed successfully.
+- False-completed-state behavior was not observed after the control-flow repair.
+
+### Phoenix Verification
+A completed/resumed Auto Review invocation produced a `bookforge.workflow.auto-review` span lasting approximately 3m33s.
+
+Verified parent attributes from the live trace:
+- `bookforge.workflow = auto-review`
+- `bookforge.workflow.operation = stage-orchestration`
+- `bookforge.workflow.unit_count = 25`
+- `bookforge.auto_review.iteration = 2`
+- `bookforge.auto_review.completed_stages = 11`
+- `openinference.span.kind = CHAIN`
+
+The trace visibly showed internal Auto Review HTTP stage calls beneath the semantic parent. Two workflow events were present. The later start/end-stage attribute refinement is present in the committed implementation; it was not separately re-run solely for that metadata rename.
+
+### Validation Notes
+- Targeted Auto Review route test after the control-flow repair: PASS, later expanded to 8 tests.
+- TypeScript and targeted ESLint validation: PASS.
+- Final local full suite: PASS with 110/110 test files and 456/456 tests, and production build PASS.
+- That final local suite also included separate, still-uncommitted Auto Review runner changes and a new runner test; therefore the 110/456 count is a workspace validation result, not a claim that those runner files are part of commit `7a13c84`.
+- Pre-existing Vite, Stripe/GoTrue negative-path stderr, and CreativeWriter CSS warnings remained non-blocking.
+
+### Gate Status
+- Gate 8A — Auto Review orchestration CHAIN: PASS
+- Internal stage calls parented under Auto Review workflow: PASS
+- Resume-from-failed-step behavior: PASS
+- Checkpoint fall-through regression: FIXED and regression-tested
+- Per-invocation workflow semantics: PASS
+
+## Next Gates
+- Gate 8B — explicit correlation across Auto Review checkpoint/self-continuation invocations if one logical-job trace is desired.
+- Controlled retry/fallback verification, including rewrite/critic model fallback semantics.
+- Direct OpenAI, Anthropic, and Google provider verification remain pending.
+- Arize AX export verification remains pending; OTLP backend neutrality is still a design requirement.
