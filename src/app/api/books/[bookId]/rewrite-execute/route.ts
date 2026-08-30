@@ -665,7 +665,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
               ...(useFallbackModel ? { model: REWRITE_FALLBACK_MODEL } : {}),
             },
             undefined,
-            telemetryContext,
+            telemetryContext
+              ? {
+                  ...telemetryContext,
+                  attempt: completionAttempt,
+                  retry: completionAttempt > 1,
+                }
+              : undefined,
             { timeoutMs: REWRITE_UNIT_COMPLETION_TIMEOUT_MS },
           );
         } catch (completionError) {
