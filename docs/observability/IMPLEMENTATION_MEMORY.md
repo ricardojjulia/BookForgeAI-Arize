@@ -1,224 +1,225 @@
 # BookForgeAI-Arize Implementation Memory
 
 ## Current Phase
-Phase 7 — LM Studio, OpenRouter, Creation, and Critic managed LLM tracing verified; next target is workflow-level CHAIN tracing
+Phase 8 — managed LLM tracing plus Critic, Rewrite, and Auto Review workflow-level OpenInference CHAIN tracing verified in Phoenix.
 
-## Canonical Local Path
-`/Users/rjulia/programs/BookForgeAI-Arize`
-
-## Repository
-`ricardojjulia/BookForgeAI-Arize` (private)
-
-## Production Upstream
-`ricardojjulia/BookForge`
-
-## Zero-Point Commit
-`3e9c54c79799530be15569a4e9fd83488f021604`
-
-## Immutable Baseline Tag
-`arize-baseline-verified` → `3e9c54c79799530be15569a4e9fd83488f021604`
-
-## Current Branch
-`feat/otel-foundation`
-
-## Branch Start Commit
-`0bbc3bec1a371fe58e15bee089db218d736bb888`
+## Canonical Repository State
+- Local path: `/Users/rjulia/programs/BookForgeAI-Arize`
+- Private repository: `ricardojjulia/BookForgeAI-Arize`
+- Production upstream: `ricardojjulia/BookForge`
+- Current branch: `feat/otel-foundation`
+- Zero-point commit: `3e9c54c79799530be15569a4e9fd83488f021604`
+- Immutable baseline tag: `arize-baseline-verified`
 
 ## Baseline Toolchain
 - Node.js: v24.15.0
 - npm: 11.13.0
-- Git: 2.50.1 (Apple Git-155)
-- GitHub CLI: 2.92.0
 - BookForge: 2.1.0
 - Next.js: 16.3.1
 - Vitest: 4.1.11
+- Baseline: lint PASS, build PASS, 109/109 test files and 453/453 tests PASS, npm audit 0 vulnerabilities.
 
-## Baseline Verification
-- npm ci: PASS
-- npm audit: 0 vulnerabilities
-- npm run build: PASS
-- npm run lint: PASS
-- npm test: PASS
-- Test files: 109 passed / 109
-- Tests: 453 passed / 453
-- Working tree after verification: CLEAN
+## Pre-existing Non-blocking Warnings
+1. Vite native-loader warning for ESM syntax in `vitest.config.ts` loaded as CommonJS.
+2. Expected stderr from Stripe signature and mocked GoTrue/Supabase negative-path tests.
+3. CreativeWriter React/CSS warning: `NaN` is invalid for the `left` CSS property.
 
-## Pre-existing Warnings
-1. Vite warns that `vitest.config.ts` uses ESM syntax while loaded as CommonJS under planned native config loading.
-2. Several negative-path tests intentionally emit stderr (Stripe signature failures and mocked GoTrue/Supabase failures) while still passing.
-3. `creativewriter-workspace.test.tsx` emits a React/CSS warning: `NaN` is invalid for the `left` CSS property.
-
-These warnings existed before any Arize/OpenTelemetry/OpenInference changes and must not be attributed to observability instrumentation.
+Do not attribute these to observability instrumentation.
 
 ## Phoenix
-- Docker image: `arizephoenix/phoenix:latest`
-- Verified Phoenix server version: 20.4.0
-- UI / HTTP endpoint: `http://localhost:6006`
-- OTLP HTTP traces endpoint: `http://localhost:6006/v1/traces`
-- OTLP gRPC: `localhost:4317`
-- `/healthz`: PASS (HTTP 200)
+- Image: `arizephoenix/phoenix:latest`
+- Verified version: 20.4.0
 - Persistent container: `bookforge-phoenix`
-- Verified Phoenix project: `bookforge-ai-arize`
+- UI: `http://localhost:6006`
+- OTLP HTTP/Protobuf endpoint: `http://localhost:6006/v1/traces`
+- OTLP gRPC: `localhost:4317`
+- Project: `bookforge-ai-arize`
+- `/healthz`: HTTP 200
 
-## OpenTelemetry / OpenInference
-Resolved foundation versions:
+Important transport lesson: OTLP HTTP/JSON reached Phoenix but returned `415 Unsupported Media Type`; the direct `@opentelemetry/exporter-trace-otlp-proto` exporter fixed the transport while retaining the same `/v1/traces` endpoint.
+
+## OpenTelemetry / OpenInference Foundation
+Resolved versions:
 - `@opentelemetry/api`: 1.9.1
 - `@opentelemetry/sdk-node`: 0.221.0
-- `@opentelemetry/exporter-trace-otlp-proto`: 0.221.0 direct exporter
+- `@opentelemetry/exporter-trace-otlp-proto`: 0.221.0
 - `@opentelemetry/resources`: 2.10.0
 - `@opentelemetry/semantic-conventions`: 1.43.0
 - `@arizeai/openinference-semantic-conventions`: 2.8.0
 
-Important transport lesson:
-- `@opentelemetry/exporter-trace-otlp-http` reached Phoenix but produced `415 Unsupported Media Type` on `/v1/traces` in this setup.
-- The corrected direct exporter is `@opentelemetry/exporter-trace-otlp-proto`, using OTLP HTTP/Protobuf to `http://localhost:6006/v1/traces`.
-- Exporter correction commit: `16e440e`.
-
-## Telemetry Bootstrap
-- `src/instrumentation.ts`: Node-runtime-only dynamic import.
-- `src/instrumentation.node.ts`: fail-open NodeSDK initialization.
-- `BOOKFORGE_OTEL_ENABLED=true` successfully starts telemetry.
-- Development duplicate-start guard enabled.
+Bootstrap:
+- `src/instrumentation.ts` performs Node-runtime-only registration.
+- `src/instrumentation.node.ts` initializes the NodeSDK fail-open.
+- `src/lib/observability/tracer.ts` exposes `bookForgeTracer` and `isBookForgeTracingEnabled()`.
+- `BOOKFORGE_OTEL_ENABLED=true` enables tracing.
 - Phoenix project routing uses the OpenInference project-name resource attribute.
-- Phoenix unavailable while BookForge is running: PASS; BookForge returned HTTP 200.
-- Phoenix unavailable during BookForge cold start: PASS; BookForge started and returned HTTP 200.
-- Phoenix restart independent of BookForge: PASS.
+- Phoenix unavailable at runtime or cold start must never break BookForge; both cases were verified.
 
-## Controlled Trace Test
-- `src/lib/observability/tracer.ts` provides the BookForge tracer.
-- `/api/telemetry/trace-test` creates a safe, content-free CHAIN span.
-- Phoenix UI visibly shows project `bookforge-ai-arize`, surrounding Next.js request/route spans, and manual child span `bookforge.telemetry.trace-test`.
-- Context propagation is proven end to end.
-- Gate 4 first exported trace: PASS.
+## Privacy Defaults
+- `BOOKFORGE_TRACE_CONTENT=false`
+- `BOOKFORGE_TRACE_USER_IDENTIFIERS=false`
+- Custom semantic spans must not contain raw manuscript, prompt, completion, title, author, user identifiers, credentials, cookies, bearer tokens, or API keys.
+- Framework/fetch instrumentation may still expose ordinary request URLs; privacy claims apply specifically to BookForge custom semantic spans and events.
 
-## Managed LLM Tracing Architecture
+## Managed LLM Tracing
 Key commits:
 - `84b7437` — privacy-safe OpenInference LLM span foundation.
 - `504b821` — provider-aware LLM telemetry context.
-- `298790a5d027ebec55f77c707b0dfe6ad2b11756` — trace managed LLM calls with OpenInference.
+- `298790a5d027ebec55f77c707b0dfe6ad2b11756` — managed LLM calls traced through OpenInference.
 
-`createManagedChatCompletion()` is the managed provider-call chokepoint.
+`createManagedChatCompletion()` remains the provider-call chokepoint. It is wrapped by `withBookForgeLlmSpan()` when telemetry context exists.
 
-The logical flow is now:
+The wrapper preserves BookForge behavior:
+- tracing disabled/failing → provider operation still runs;
+- existing credit reservation/reconciliation remains authoritative;
+- existing provider retry behavior remains authoritative;
+- original provider/model errors are rethrown unchanged;
+- existing BookForge billing/model-performance telemetry remains authoritative;
+- content capture remains off.
 
-BookForge route/workflow → model selection → provider-aware telemetry context → `withBookForgeLlmSpan()` → provider invocation → existing BookForge outcome/cost/reconciliation telemetry.
-
-The wrapper preserves existing BookForge semantics:
-- credit reservation remains before cloud provider invocation;
-- the deprecated-temperature retry remains the same logical request;
-- existing `recordModelCallEvent()` behavior remains intact;
-- credit reconciliation remains intact;
-- tracing failures remain fail-open;
-- original provider/model errors remain authoritative;
-- raw prompt/completion capture remains off.
-
-## Provider Attribution
-Provider identity comes from BookForge configuration, not from the OpenAI SDK transport class.
-
-Supported semantic mapping:
+Semantic provider attribution comes from BookForge configuration, not the OpenAI-compatible transport class:
 - LM Studio → `provider=lmstudio`, `execution=local`
 - OpenAI → `provider=openai`, `execution=cloud`
 - Anthropic → `provider=anthropic`, `execution=cloud`
 - Google → `provider=google`, `execution=cloud`
 - OpenRouter → `provider=openrouter`, `execution=cloud`
 
-This is required because BookForge intentionally uses OpenAI-compatible transport semantics for multiple providers.
-
-## Live Managed LLM Verification — LM Studio
-Verified using the real Create Book → Concept path:
-- span: `bookforge.llm.planning`
-- provider: `lmstudio`
-- execution: `local`
-- model: `qwen/qwen3.6-35b-a3b`
-- prompt/completion/total tokens: 439 / 3499 / 3938
-- event: `provider.attempt`, attempt 1
-
-## Live Managed LLM Verification — OpenRouter
-Verified using a real Create Book → Concept cloud call:
-- span: `bookforge.llm.planning`
-- provider: `openrouter`
-- execution: `cloud`
-- requested/resolved model: `anthropic/claude-haiku-4.5`
-- prompt/completion/total tokens: 468 / 1280 / 1748
-- event: `provider.attempt`, attempt 1
-
-This proves provider and model family are separate dimensions. OpenRouter is the provider even when the model identifier is namespaced to Anthropic.
-
-## Critic Workflow Verification
-A real drafted-book Critic run was executed through OpenRouter using the existing managed LLM instrumentation.
-
-Phoenix visibly showed eight `bookforge.llm.critic` spans in the same trace, matching BookForge's eight supported Critic lenses. This is the first verified multi-call BookForge workflow.
-
-Selected verified example span:
-- span name: `bookforge.llm.critic`
-- status: OK
-- latency: approximately 7 s
-- provider: `openrouter`
-- execution: `cloud`
-- task: `critic`
-- attempt: 1
-- retry: false
-- requested/resolved model shown as `google/gemini-2.5-flash-lite`
-- OpenInference kind: `LLM`
-- message count: 1
-- estimated input tokens: 897
-- output chars: 7327
-- output words: 1023
-- total token count shown by Phoenix: 2183
-- event count: 1 (`provider.attempt`)
-- same trace showed outbound OpenRouter chat-completion HTTP calls
-
-The custom Critic LLM span remained metadata-only; no raw manuscript content was visible in the displayed custom attributes.
-
-## Critic Workflow Architecture
-`runCriticLens()` selects models with `task: "critic"` and calls `createManagedChatCompletion()` through the verified managed LLM boundary.
-
-The Critic path supports up to two completion attempts. On cloud execution, an empty first completion can retry using fallback model `google/gemini-2.5-flash`. That fallback remains a useful later verification target.
-
-## Trace Export
-Operational end to end:
-BookForge → OpenTelemetry API → NodeSDK → OTLP HTTP/Protobuf → Phoenix project `bookforge-ai-arize`.
-
-## Content Capture / Privacy
-Disabled by default.
-- `BOOKFORGE_TRACE_CONTENT=false`
-- `BOOKFORGE_TRACE_USER_IDENTIFIERS=false`
-- Live managed LLM spans show metadata/counts rather than raw prompt/completion content.
-- No custom attribute/event should contain manuscript content, book title, author identity, user ID, API key, cookie, bearer token, or Supabase credential.
-
-## Verified Providers
-- [x] LM Studio — real managed `planning` call verified in Phoenix
-- [ ] OpenAI
+Verified providers:
+- [x] LM Studio — real managed planning call
+- [x] OpenRouter — real planning, Critic, and Rewrite calls
+- [ ] OpenAI direct
 - [ ] Anthropic direct
 - [ ] Google direct
-- [x] OpenRouter — real managed cloud `planning` and `critic` calls verified in Phoenix
 
-## Verified Workflows
-- [x] Simple managed completion / managed-call boundary
-- [x] Critic — eight LLM spans visible in one real Critic trace
-- [x] Creation — Concept planning path verified locally and through OpenRouter
-- [ ] Rewrite
-- [ ] Auto Review
-- [ ] Retry/fallback
+## Reusable Workflow Span
+`src/lib/observability/workflow-span.ts` provides `withBookForgeWorkflowSpan()`.
 
-## Gate Status
+Properties:
+- OpenInference kind `CHAIN`.
+- Fail-open.
+- Activates the workflow span in OTel context so nested calls inherit it.
+- Records workflow errors and rethrows the original error.
+- Metadata-only; raw content must never be attached.
+
+Known-good workflow wrapper commit lineage begins with:
+- `bf06abbc7fd76c1c9fbbe318dc9343cdd523b802` — Critic workflow CHAIN.
+
+## Critic Workflow — VERIFIED
+Commit: `bf06abbc7fd76c1c9fbbe318dc9343cdd523b802`.
+
+Observed Phoenix hierarchy:
+
+`bookforge.workflow.critic` CHAIN
+→ eight `bookforge.llm.critic` LLM children.
+
+Verified workflow attributes:
+- `bookforge.workflow=critic`
+- `bookforge.workflow.operation=all-lenses`
+- `bookforge.workflow.stage=baseline`
+- `bookforge.workflow.unit_count=8`
+- `bookforge.workflow.successful_units=8`
+- `bookforge.workflow.failed_units=0`
+- `openinference.span.kind=CHAIN`
+
+Critic retry/fallback remains separately unverified. A cloud empty-completion retry can switch to `google/gemini-2.5-flash`; do not mark fallback telemetry verified until exercised and inspected.
+
+## Rewrite Workflow — VERIFIED
+Commit: `53c4e6139ab913fc4787cde869cb6c2a73aaa437`.
+
+Each chapter-bounded rewrite batch wraps up to five concurrent paragraph model calls in `bookforge.workflow.rewrite`.
+
+Observed Phoenix hierarchy:
+
+`bookforge.workflow.rewrite` CHAIN
+→ five `bookforge.llm.rewrite` LLM children in the verified batch.
+
+Verified workflow attributes:
+- `bookforge.workflow=rewrite`
+- `bookforge.workflow.operation=paragraph-chunk`
+- `bookforge.workflow.unit_count=5`
+- `bookforge.workflow.fulfilled_calls=5`
+- `bookforge.workflow.rejected_calls=0`
+- `bookforge.rewrite.strategy=humanized_literary`
+- `openinference.span.kind=CHAIN`
+
+Rewrite supports up to three completion attempts and a cloud fallback model `google/gemini-2.5-flash`; fallback semantics remain a later controlled gate.
+
+## Auto Review Workflow — VERIFIED PER INVOCATION
+Commit: `7a13c84` — `feat: trace Auto Review orchestration with OpenInference chain`.
+
+Auto Review is a cross-route orchestrator. Its stage order contains 25 entries including analyze, summarize, eight baseline critics, rewrite plan, rewrite execution, auto-accept, drift check, eight post-rewrite critics, critics check, export, and mark-finished.
+
+The route wraps each worker invocation in `bookforge.workflow.auto-review` rather than pretending one in-memory span can survive indefinitely across Vercel checkpoint/self-continuation boundaries.
+
+Verified live Phoenix attributes on a resumed invocation:
+- `bookforge.workflow=auto-review`
+- `bookforge.workflow.operation=stage-orchestration`
+- `bookforge.workflow.unit_count=25`
+- `bookforge.auto_review.iteration=2`
+- `bookforge.auto_review.completed_stages=11`
+- `openinference.span.kind=CHAIN`
+- internal HTTP stage calls visibly parented beneath the workflow span
+- two workflow events visible
+
+The committed implementation now also records:
+- `bookforge.auto_review.start_stage`
+- `bookforge.auto_review.end_stage`
+
+Those names replaced the misleading generic `bookforge.workflow.stage` for this long-running orchestrator. The rename itself was not separately live-retested because the parent hierarchy had already been verified.
+
+### Critical Auto Review Control-Flow Lesson
+The first wrapper version used:
+
+`await withBookForgeWorkflowSpan(...)`
+
+while checkpoint branches returned `NextResponse.json(...)` from inside the callback. The outer route discarded that callback result and fell through to the final `updateJob({ completed: true })`, falsely completing a checkpointed job.
+
+The committed fix is:
+
+`const workflowResult = await withBookForgeWorkflowSpan(...)`
+
+followed by:
+
+`if (workflowResult) return workflowResult;`
+
+A regression test now proves checkpoint responses do not mark the overall Auto Review job completed.
+
+Behavioral live verification after the fix:
+- failed/resumable run restored at `rewrite_execute`;
+- wizard resumed from the failed step;
+- earlier completed work remained preserved;
+- remaining stages ran to completion;
+- false-completed-state regression was not observed.
+
+## Current Gate Status
 - Gate 3A — Phoenix local backend: PASS
-- Gate 3B — telemetry bootstrap + fail-open: PASS
+- Gate 3B — telemetry bootstrap/fail-open: PASS
 - Gate 4 — first exported trace: PASS
 - Gate 5A — privacy-safe LLM span foundation: PASS
 - Gate 5B — provider-aware telemetry context: PASS
 - Gate 5C — real managed LLM trace: PASS
 - Gate 6A — OpenRouter cloud provider verification: PASS
-- Gate 7A — Critic workflow managed LLM verification: PASS
+- Gate 7A — Critic managed LLM workflow visibility: PASS
+- Gate 7B — Critic workflow CHAIN: PASS
+- Gate 7C — Rewrite workflow CHAIN: PASS
+- Gate 8A — Auto Review per-invocation orchestration CHAIN: PASS
 
 ## Known-Good Checkpoints
-- Immutable pre-observability rollback anchor: `arize-baseline-verified` → `3e9c54c79799530be15569a4e9fd83488f021604`
-- Verified managed LLM instrumentation checkpoint: `298790a5d027ebec55f77c707b0dfe6ad2b11756`
+- Pre-observability rollback anchor: `arize-baseline-verified` → `3e9c54c79799530be15569a4e9fd83488f021604`
+- Managed LLM checkpoint: `298790a5d027ebec55f77c707b0dfe6ad2b11756`
+- Critic CHAIN checkpoint: `bf06abbc7fd76c1c9fbbe318dc9343cdd523b802`
+- Rewrite CHAIN checkpoint: `53c4e6139ab913fc4787cde869cb6c2a73aaa437`
+- Auto Review orchestration checkpoint: `7a13c84`
 
-## Next Action
-1. Add one privacy-safe higher-level CHAIN/workflow span around a multi-call Critic run, while leaving `createManagedChatCompletion()` as the LLM child-span boundary.
-2. Verify in Phoenix that the Critic workflow span parents the individual `bookforge.llm.critic` spans.
-3. Use that workflow wrapper pattern for Rewrite and Auto Review.
-4. Keep retry/fallback verification as a separate controlled gate.
-5. Preserve metadata-only privacy defaults and fail-open behavior.
-6. After broader Phoenix verification, prove the same OTLP design against Arize AX and retain backend neutrality for future Dynatrace targeting.
+## Local Working-Tree Caution After Auto Review Commit
+After `7a13c84` was pushed, the local workspace still contained separate Auto Review runner work that was intentionally not included in the observability commit:
+- modified `src/components/books/auto-review/auto-review-runner.tsx`
+- untracked `src/components/books/auto-review/auto-review-runner.test.ts`
+
+The final local full validation reported 110/110 test files and 456/456 tests plus a passing production build, but those counts include that separate uncommitted runner work. Do not attribute the runner files to commit `7a13c84`, and do not discard them accidentally when syncing documentation commits.
+
+## Next Actions
+1. Decide whether Gate 8B should correlate Auto Review self-checkpoint/self-continuation invocations into one logical-job trace. Current per-invocation CHAIN semantics are already valid.
+2. Add a controlled retry/fallback verification gate for Critic and/or Rewrite, checking attempt/retry/model semantics rather than inferring behavior.
+3. Verify direct OpenAI, Anthropic, and Google providers only when actual direct-provider calls are available; OpenRouter calls using those model namespaces do not count as direct-provider verification.
+4. Verify the same OTLP design against Arize AX while retaining backend neutrality for future Dynatrace targeting.
