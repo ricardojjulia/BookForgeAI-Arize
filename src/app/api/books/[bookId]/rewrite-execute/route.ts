@@ -197,7 +197,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         .order("chapter_number"),
       supabase
         .from("revision_versions")
-        .select("paragraph_id,accepted,rejected")
+        .select("paragraph_id,accepted,rejected,revision_job_id")
         .eq("book_id", bookId)
         .not("paragraph_id", "is", null),
       supabase
@@ -448,6 +448,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const anyRevisionParagraphIds = new Set(
       ((existingRevisions || []) as ExistingRevisionRow[]).map((revision) => revision.paragraph_id).filter(Boolean),
     );
+    const currentJobDraftParagraphIds = new Set(
+      ((existingRevisions || []) as ExistingRevisionRow[])
+        .filter((revision) => revision.revision_job_id === jobId)
+        .map((revision) => revision.paragraph_id)
+        .filter(Boolean),
+    );
     const retryParagraphIds = body.retryJobId ? await getRetryParagraphIds(supabase, body.retryJobId) : null;
     // Paragraphs that already exhausted their retry budget (see maxCompletionAttempts
     // below) earlier in THIS SAME job. Without this exclusion, a paragraph that's
@@ -504,6 +510,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         }
         if (paragraph.is_locked || (!body.forceTinyParagraphs && shouldSkipParagraph(paragraph.original_text, chapter.title))) {
           skipped += 1;
+          continue;
+        }
+        if (currentJobDraftParagraphIds.has(paragraph.id)) {
+          skipped += 1;
+          skippedExistingDrafts += 1;
           continue;
         }
         if (!body.rewriteExistingDrafts && pendingDraftParagraphIds.has(paragraph.id)) {

@@ -92,6 +92,18 @@ const CRITIC_LABELS: Record<string, string> = {
   dialogue_density: "Dialogue Density",
 };
 
+const LOOP_STAGE_IDS = new Set<string>([
+  "rewrite_execute",
+  "auto_accept",
+  "drift_check",
+  ...CRITIC_LENSES.map((lens) => `critic_post:${lens}`),
+  "critics_check",
+]);
+
+export function isAutoReviewStageComplete(stageId: string, completed: Set<string>, iteration: number) {
+  return completed.has(stageId) || (LOOP_STAGE_IDS.has(stageId) && completed.has(`${stageId}@${iteration}`));
+}
+
 function buildStages(): Stage[] {
   return [
     { id: "analyze", label: "Analyze & Blueprint", group: "Prep" },
@@ -192,9 +204,10 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
     if (!serverManaged || !job) return null;
 
     const completed = new Set(job.stages_completed || []);
+    const jobIteration = job.iteration || 0;
     return {
       stageStates: stageStates.map((stage) => {
-        if (completed.has(stage.id)) return { ...stage, status: "done" as StageStatus };
+        if (isAutoReviewStageComplete(stage.id, completed, jobIteration)) return { ...stage, status: "done" as StageStatus };
         if (job.current_stage === stage.id && job.status === "running") return { ...stage, status: "running" as StageStatus };
         if (job.status === "failed" && job.current_stage === stage.id) {
           return { ...stage, status: "failed" as StageStatus, detail: job.error || "Failed" };
@@ -202,7 +215,7 @@ export function AutoReviewRunner({ bookId, bookTitle, jobId, mode, onDone, compl
         return { ...stage, status: "pending" as StageStatus, detail: undefined };
       }),
       log: (job.log || []).map((entry, index) => `[${index + 1}] ${entry.message || entry.stage || entry.type || "log"}`),
-      iteration: job.iteration || 0,
+      iteration: jobIteration,
       done: job.status === "completed",
       failed: job.status === "failed",
       errorMsg: job.error || null,

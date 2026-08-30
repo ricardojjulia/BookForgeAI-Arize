@@ -49,6 +49,10 @@ function getErrorMessage(error: unknown) {
   return "Rewrite plan generation failed.";
 }
 
+const REWRITE_PLAN_COMPLETION_TIMEOUT_MS =
+  parsePositiveInteger(process.env.BOOKFORGE_REWRITE_PLAN_TIMEOUT_MS) ??
+  300_000;
+
 // A direct (non-serverManaged) call runs its model call synchronously
 // in-request, with no explicit max_tokens (falls through to the account's
 // general cloud output-budget setting, which can be sizable) -- no
@@ -56,7 +60,7 @@ function getErrorMessage(error: unknown) {
 // the 45s client-side SDK timeout, which a real cloud-model call can exceed
 // on a slower model/tier. See src/lib/critic/run.ts for the incident this
 // pattern traces back to.
-export const maxDuration = 150;
+export const maxDuration = 400;
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
@@ -295,7 +299,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         },
         undefined,
         telemetryContext,
-        { timeoutMs: 140_000 },
+        { timeoutMs: REWRITE_PLAN_COMPLETION_TIMEOUT_MS },
       );
 
       const parsed = parseModelJsonOrFallback(completion.choices[0]?.message.content || "{}", (raw, parseError) => ({
@@ -412,4 +416,10 @@ async function readJsonBody(request: Request) {
   } catch {
     return {};
   }
+}
+
+function parsePositiveInteger(value: string | undefined) {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }

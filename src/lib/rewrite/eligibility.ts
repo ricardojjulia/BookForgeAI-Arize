@@ -17,6 +17,7 @@ export type ExistingRevisionRow = {
   paragraph_id: string | null;
   accepted: boolean | null;
   rejected: boolean | null;
+  revision_job_id?: string | null;
 };
 
 // A paragraph can carry BOTH an old accepted revision and a newer pending

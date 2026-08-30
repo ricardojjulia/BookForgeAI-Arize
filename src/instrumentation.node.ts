@@ -37,8 +37,23 @@ if (isEnabled() && !globalThis.__bookforgeOtelStarted) {
     const projectName =
       process.env.BOOKFORGE_OTEL_PROJECT_NAME || "bookforge-ai-arize";
 
+    const headers: Record<string, string> = {};
+
+    if (process.env.BOOKFORGE_OTEL_AUTHORIZATION) {
+      headers.authorization = process.env.BOOKFORGE_OTEL_AUTHORIZATION;
+    }
+
+    if (process.env.BOOKFORGE_OTEL_API_KEY) {
+      headers.api_key = process.env.BOOKFORGE_OTEL_API_KEY;
+    }
+
+    if (process.env.BOOKFORGE_OTEL_SPACE_ID) {
+      headers["arize-space-id"] = process.env.BOOKFORGE_OTEL_SPACE_ID;
+    }
+
     const traceExporter = new OTLPTraceExporter({
       url: endpoint,
+      ...(Object.keys(headers).length > 0 ? { headers } : {}),
     });
 
     const sdk = new NodeSDK({
@@ -53,7 +68,7 @@ if (isEnabled() && !globalThis.__bookforgeOtelStarted) {
 
     sdk.start();
     debug(
-      `started; exporting traces to ${endpoint}; Phoenix project=${projectName}`,
+      `started; exporting traces to ${endpoint}; project=${projectName}`,
     );
   } catch (error) {
     // Fail open: observability must never prevent BookForge from starting.
