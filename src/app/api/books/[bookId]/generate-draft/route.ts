@@ -38,6 +38,7 @@ type ArchitectureChapter = {
 // by the 10-minute stale-heartbeat sweep with no real error ever thrown.
 export const maxDuration = 780;
 const CHAPTER_COMPLETION_TIMEOUT_MS = 760_000;
+const CHAPTER_CLAIM_STALE_MS = 900_000;
 // Same fallback used by rewrite-execute's per-paragraph retry (that file's
 // REWRITE_FALLBACK_MODEL) -- retrying a failed cloud call against the exact
 // same model wastes a full generation attempt for very little chance of a
@@ -131,12 +132,43 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     const architectureChapters = flattenArchitectureChapters(architecture);
     const { data: chapters, error: chaptersError } = await supabase
       .from("chapters")
-      .select("id,chapter_number,title,summary,status,original_text")
+      .select("id,chapter_number,title,summary,status,original_text,updated_at")
       .eq("book_id", bookId)
       .order("chapter_number");
     if (chaptersError) throw chaptersError;
 
-    const plannedChapters = (chapters || [])
+    const chapterRows = (chapters || []) as Array<{
+      id: string;
+      chapter_number: number;
+      title: string | null;
+      summary: string | null;
+      status: string | null;
+      original_text: string | null;
+      updated_at: string | null;
+    }>;
+    const staleGeneratingChapterIds = chapterRows
+      .filter((chapter) => isStaleGeneratingChapter(chapter.status, chapter.updated_at))
+      .map((chapter) => chapter.id);
+
+    if (staleGeneratingChapterIds.length) {
+      const releasedAt = new Date().toISOString();
+      const { error: releaseError } = await supabase
+        .from("chapters")
+        .update({ status: "planned", updated_at: releasedAt })
+        .in("id", staleGeneratingChapterIds)
+        .eq("book_id", bookId)
+        .eq("status", "generating");
+      if (releaseError) throw releaseError;
+
+      for (const chapter of chapterRows) {
+        if (staleGeneratingChapterIds.includes(chapter.id)) {
+          chapter.status = "planned";
+          chapter.updated_at = releasedAt;
+        }
+      }
+    }
+
+    const plannedChapters = chapterRows
       .filter((chapter) => chapter.status === "planned" || isPlaceholderText(chapter.original_text || ""))
       .filter((chapter) => !body.chapterId || chapter.id === body.chapterId)
       .slice(0, limit);
@@ -301,7 +333,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
         // caller that flips planned -> generating gets to proceed.
         const { data: claimedChapterRows, error: claimError } = await supabase
           .from("chapters")
-          .update({ status: "generating" })
+          .update({ status: "generating", updated_at: new Date().toISOString() })
           .eq("id", chapter.id)
           .eq("status", "planned")
           .select("id");
@@ -494,7 +526,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
           // the atomic-claim check above only matches status === "planned".
           // Without this, a chapter whose generation failed would stay
           // stuck at "generating" forever and never be claimable again.
-          await supabase.from("chapters").update({ status: "planned" }).eq("id", chapter.id).eq("status", "generating");
+          await supabase
+            .from("chapters")
+            .update({ status: "planned", updated_at: new Date().toISOString() })
+            .eq("id", chapter.id)
+            .eq("status", "generating");
           throw chapterError;
         } finally {
           heartbeat.stop();
@@ -504,7 +540,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       // Recomputed from a fresh read at the top of THIS request, so this
       // already reflects true current DB state -- chapters drafted by any
       // earlier chunk call are no longer "planned" by the time this query ran.
-      const remainingChapters = Math.max(0, (chapters || []).filter((chapter) => chapter.status === "planned").length - generated.length);
+      const remainingChapters = Math.max(
+        0,
+        chapterRows.filter((chapter) => chapter.status === "planned" || chapter.status === "generating").length -
+          generated.length,
+      );
       const isJobDone = remainingChapters === 0;
       const nowIso = new Date().toISOString();
       currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
@@ -669,6 +709,12 @@ function isPlaceholderText(text: string) {
   return /Draft text has not been generated yet\. This planned chapter shell was created from BookForge Creator architecture\./i.test(
     text,
   );
+}
+
+function isStaleGeneratingChapter(status: string | null, updatedAt: string | null) {
+  if (status !== "generating" || !updatedAt) return false;
+  const updatedAtMs = Date.parse(updatedAt);
+  return Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs > CHAPTER_CLAIM_STALE_MS;
 }
 
 function parseChapterCompletion(rawContent: string, title: string) {

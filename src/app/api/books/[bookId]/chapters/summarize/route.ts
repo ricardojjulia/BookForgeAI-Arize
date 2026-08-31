@@ -202,8 +202,9 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       if (currentStatus === "cancelled") break;
 
       attempted += 1;
+      const chapterLabel = formatChapterProgressLabel(chapter.chapter_number, chapter.title);
       jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
-        currentUnit: `Chapter ${chapter.chapter_number}: ${chapter.title || `Chapter ${chapter.chapter_number}`} (${index + 1}/${chapterRows.length})`,
+        currentUnit: `${chapterLabel} (${index + 1}/${chapterRows.length})`,
         totalUnits: chapterRows.length,
         attempted,
         successful: results.length,
@@ -211,7 +212,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         skipped: 0,
       });
       const heartbeat = createRevisionJobHeartbeat(supabase, jobId, jobSettings, {
-        currentUnit: `Chapter ${chapter.chapter_number}: ${chapter.title || `Chapter ${chapter.chapter_number}`} (${index + 1}/${chapterRows.length})`,
+        currentUnit: `${chapterLabel} (${index + 1}/${chapterRows.length})`,
         totalUnits: chapterRows.length,
         attempted,
         successful: results.length,
@@ -286,7 +287,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             {
               id: chapter.id,
               type: "chapter",
-              label: `Chapter ${chapter.chapter_number}: ${title}`,
+              label: chapterLabel,
               error: message,
             },
           ],
@@ -398,4 +399,13 @@ function extractSummary(parsed: unknown) {
 
   if (typeof parsed === "string" && parsed.trim()) return parsed.trim();
   return "Summary generated, but the model returned an empty summary field.";
+}
+
+function formatChapterProgressLabel(chapterNumber: number, title?: string | null) {
+  const fallback = `Chapter ${chapterNumber}`;
+  const trimmed = title?.trim();
+  if (!trimmed) return fallback;
+  return new RegExp(`^chapter\\s+${chapterNumber}(\\b|\\s*[:.-])`, "i").test(trimmed)
+    ? trimmed
+    : `${fallback}: ${trimmed}`;
 }

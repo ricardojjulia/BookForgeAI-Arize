@@ -27,6 +27,9 @@ type ParagraphRow = {
   accepted_text: string | null;
 };
 
+const CLOUD_CRITIC_TIMEOUT_MS = 140_000;
+const LOCAL_CRITIC_TIMEOUT_MS = 300_000;
+
 export type CriticRunContext = {
   title: string;
   bookBible: unknown;
@@ -195,7 +198,7 @@ export async function runCriticLens(input: {
       // ~39 tokens/sec through OpenRouter's current routing -- the default
       // 4,096-token cloud budget alone can need ~105s. See maxDuration on the
       // calling route(s) for the matching platform-level budget.
-      { timeoutMs: 140_000 },
+      { timeoutMs: getCriticTimeoutMs(Boolean(preparedModel.isCloud)) },
     );
     rawContent = (completion.choices[0]?.message.content || "").trim();
     if (rawContent) break;
@@ -273,6 +276,18 @@ export async function runCriticLens(input: {
   }
 
   return content;
+}
+
+function getCriticTimeoutMs(isCloud: boolean) {
+  const configured = parsePositiveInteger(process.env.BOOKFORGE_CRITIC_TIMEOUT_MS);
+  if (configured) return configured;
+  return isCloud ? CLOUD_CRITIC_TIMEOUT_MS : LOCAL_CRITIC_TIMEOUT_MS;
+}
+
+function parsePositiveInteger(value: string | undefined) {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function normalizeCriticReportContent(content: Record<string, unknown>) {

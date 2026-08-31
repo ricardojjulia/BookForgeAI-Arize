@@ -429,12 +429,22 @@ export async function updateRevisionJobProgress(
   settings: unknown,
   progress: Partial<AiJobProgress>,
 ) {
+  let baseSettings = settings;
+  if (!extractJobProgress(baseSettings)) {
+    const { data } = await supabase
+      .from("revision_jobs")
+      .select("settings")
+      .eq("id", jobId)
+      .maybeSingle();
+    baseSettings = data?.settings || baseSettings;
+  }
+
   const nextProgress = buildJobProgress({
-    ...extractJobProgress(settings),
+    ...extractJobProgress(baseSettings),
     ...progress,
     lastHeartbeatAt: new Date().toISOString(),
   });
-  const nextSettings = mergeJobSettings(settings, nextProgress);
+  const nextSettings = mergeJobSettings(baseSettings, nextProgress);
   const { error } = await supabase.from("revision_jobs").update({ settings: nextSettings }).eq("id", jobId);
   if (error) throw error;
   return nextSettings;

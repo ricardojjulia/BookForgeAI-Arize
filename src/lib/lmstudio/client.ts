@@ -373,24 +373,30 @@ export async function createManagedChatCompletion(
         attempt: 1,
         model: resolvedModel,
       });
-      const completion = await client.chat.completions.create(
-        {
-          ...safeParams,
-          model: resolvedModel,
-          // Trust an explicitly-passed max_tokens as-is; only fall back to the
-          // prepared/account default when the caller didn't specify one. The
-          // previous Math.min(params.max_tokens || default, default) is
-          // mathematically always equal to `default` whenever a caller passes
-          // anything larger than it — silently discarding every explicit
-          // request for more output, for every call site in the codebase. This
-          // is what made a book architecture's own increased max_tokens budget
-          // a no-op: it always got re-clamped back down to the account's
-          // general cloud max-output setting (tuned for per-paragraph rewrite
-          // calls), regardless of what the architecture route asked for.
-          max_tokens: maxOutputTokens,
-        },
-        requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
-      );
+      const completionRequest = createCompletionRequestOptions(requestOptions?.timeoutMs);
+      let completion: OpenAI.Chat.Completions.ChatCompletion;
+      try {
+        completion = await client.chat.completions.create(
+          {
+            ...safeParams,
+            model: resolvedModel,
+            // Trust an explicitly-passed max_tokens as-is; only fall back to the
+            // prepared/account default when the caller didn't specify one. The
+            // previous Math.min(params.max_tokens || default, default) is
+            // mathematically always equal to `default` whenever a caller passes
+            // anything larger than it — silently discarding every explicit
+            // request for more output, for every call site in the codebase. This
+            // is what made a book architecture's own increased max_tokens budget
+            // a no-op: it always got re-clamped back down to the account's
+            // general cloud max-output setting (tuned for per-paragraph rewrite
+            // calls), regardless of what the architecture route asked for.
+            max_tokens: maxOutputTokens,
+          },
+          completionRequest.options,
+        );
+      } finally {
+        completionRequest.clear();
+      }
       const content = completion.choices[0]?.message.content || "";
       llmSpan?.setResult({
         resolvedModel: completion.model || resolvedModel,
@@ -431,14 +437,20 @@ export async function createManagedChatCompletion(
           reason: "deprecated_temperature",
           model: resolvedModel,
         });
-        const completion = await client.chat.completions.create(
-          {
-            ...safeRetryParams,
-            model: resolvedModel,
-            max_tokens: maxOutputTokens,
-          },
-          requestOptions?.timeoutMs ? { timeout: requestOptions.timeoutMs } : undefined,
-        );
+        const retryRequest = createCompletionRequestOptions(requestOptions?.timeoutMs);
+        let completion: OpenAI.Chat.Completions.ChatCompletion;
+        try {
+          completion = await client.chat.completions.create(
+            {
+              ...safeRetryParams,
+              model: resolvedModel,
+              max_tokens: maxOutputTokens,
+            },
+            retryRequest.options,
+          );
+        } finally {
+          retryRequest.clear();
+        }
         const retryContent = completion.choices[0]?.message.content || "";
         llmSpan?.setResult({
           resolvedModel: completion.model || resolvedModel,
@@ -475,6 +487,35 @@ export async function createManagedChatCompletion(
       throw error;
     }
   }
+}
+
+function createCompletionRequestOptions(timeoutMs?: number): {
+  options?: { timeout: number; signal: AbortSignal; maxRetries: 0 };
+  clear(): void;
+} {
+  if (!timeoutMs) {
+    return { clear() {} };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  if (typeof timeout.unref === "function") timeout.unref();
+
+  // OpenAI SDK v7 checks the caller's options.signal before retrying, so an
+  // already-aborted signal short-circuits retryRequest(). Keep maxRetries: 0
+  // anyway: the SDK also has its own timeout timers, and if one of those wins
+  // the race against this caller-owned AbortController, the normal retry path
+  // can otherwise multiply a route's carefully chosen wall-clock budget.
+  return {
+    options: {
+      timeout: timeoutMs,
+      signal: controller.signal,
+      maxRetries: 0,
+    },
+    clear() {
+      clearTimeout(timeout);
+    },
+  };
 }
 
 /**

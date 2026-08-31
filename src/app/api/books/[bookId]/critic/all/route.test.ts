@@ -127,7 +127,10 @@ describe("POST /api/books/[bookId]/critic/all", () => {
       sceneCount: 0,
       paragraphCount: 0,
     });
-    mockPreloadCriticModelExecution.mockResolvedValue({ settings: {}, modelPlan: {} });
+    mockPreloadCriticModelExecution.mockResolvedValue({
+      settings: {},
+      modelPlan: { preparedModel: { isCloud: false } },
+    });
 
     mockRunCriticLens.mockImplementation(async ({ lens }: { lens: string }) => {
       if (lens === "prose_quality") {

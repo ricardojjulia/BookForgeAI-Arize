@@ -39,6 +39,10 @@ function getErrorMessage(
   return "Analysis failed.";
 }
 
+const ANALYZE_CHUNK_COMPLETION_TIMEOUT_MS =
+  parsePositiveInteger(process.env.BOOKFORGE_ANALYZE_CHUNK_TIMEOUT_MS) ??
+  300_000;
+
 // A direct (non-serverManaged) call runs one createManagedChatCompletion
 // call per manuscript chunk, sequentially, all inside this one request --
 // chunk count is unbounded (the whole manuscript), so this needs the
@@ -245,7 +249,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           },
           undefined,
           telemetryContext,
-          { timeoutMs: 90_000 },
+          { timeoutMs: ANALYZE_CHUNK_COMPLETION_TIMEOUT_MS },
         );
 
         const content = completion.choices[0]?.message.content || "{}";
@@ -271,7 +275,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           modelSource: modelSelection.source,
           configuredModels: modelSelection.configuredModels,
         });
-        await updateRevisionJobProgress(supabase, jobId, jobSettings, {
+        jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
           currentUnit: `Failed at analysis chunk ${chunk.chunkNumber}`,
           totalUnits: chunks.length,
           attempted,
@@ -288,6 +292,38 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             },
           ],
         });
+        const completedAt = new Date().toISOString();
+        const failedJobSettings =
+          jobSettings && typeof jobSettings === "object"
+            ? (jobSettings as Record<string, unknown>)
+            : {};
+        const failedJobProgress =
+          failedJobSettings.progress && typeof failedJobSettings.progress === "object"
+            ? (failedJobSettings.progress as Record<string, unknown>)
+            : {};
+        const { error: failedJobError } = await supabase
+          .from("revision_jobs")
+          .update({
+            status: "failed",
+            completed_at: completedAt,
+            error_message: message,
+            settings: {
+              ...failedJobSettings,
+              progress: buildJobProgress({
+                ...failedJobProgress,
+                currentUnit: `Failed at analysis chunk ${chunk.chunkNumber}`,
+                totalUnits: chunks.length,
+                attempted,
+                successful: partials.length,
+                failed,
+                skipped: 0,
+                message,
+                completedAt,
+              }),
+            },
+          })
+          .eq("id", jobId);
+        if (failedJobError) throw failedJobError;
         throw chunkError;
       } finally {
         heartbeat.stop();
@@ -417,6 +453,12 @@ async function readJsonBody(request: Request) {
   } catch {
     return {};
   }
+}
+
+function parsePositiveInteger(value: string | undefined) {
+  if (!value) return null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 async function getRetryAnalysisChunkNumbers(

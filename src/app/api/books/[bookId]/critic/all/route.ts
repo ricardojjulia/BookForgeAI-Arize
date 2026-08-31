@@ -18,6 +18,8 @@ const schema = z.object({
   metadataBranchName: z.string().min(1).max(80).optional(),
 });
 
+const LOCAL_CRITIC_CONCURRENCY = 2;
+
 function getErrorMessage(error: unknown) {
   const lmStudioMessage = getLmStudioErrorMessage(error, "");
   if (lmStudioMessage) return lmStudioMessage;
@@ -147,16 +149,18 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       stage: batchStage,
     });
     const modelExecution = await preloadCriticModelExecution(supabase, user.id);
+    const criticConcurrency = modelExecution.modelPlan.preparedModel.isCloud
+      ? lenses.length
+      : LOCAL_CRITIC_CONCURRENCY;
 
     const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
     const preDispatchStatus = pauseStatus === "cancelled" ? "cancelled" : await getRevisionJobStatus(supabase, jobId);
 
     // All 8 lenses are independent, read-only evaluations of the same static
-    // context — unlike rewrite-execute's paragraphs, there's no ordering or
-    // drift concern, so they run fully concurrently rather than one at a
-    // time. Shared state (counters, job progress, failedUnits) is only ever
-    // touched in the plain sequential loop below, over already-settled
-    // results, so there's no race on the job row's progress column.
+    // context. Cloud providers can genuinely parallelize them, but a local LM
+    // Studio server usually shares one loaded model/GPU; cap local concurrency
+    // so late lenses do not spend most of their timeout waiting in provider
+    // queue. Shared state is still only touched in the sequential loop below.
     jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
       currentUnit: `Running all ${lenses.length} critic lenses`,
       totalUnits: lenses.length,
@@ -188,8 +192,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
                 "critic.lens_count": lenses.length,
               });
 
-              const results = await Promise.allSettled(
-                lenses.map((lens) =>
+              const results = await mapWithConcurrency(
+                lenses,
+                criticConcurrency,
+                (lens) =>
                   runCriticLens({
                     supabase,
                     bookId,
@@ -199,7 +205,6 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
                     preloadedContext,
                     modelExecution,
                   }),
-                ),
               );
 
               const successful = results.filter(
@@ -327,4 +332,32 @@ async function readJsonBody(request: Request) {
   } catch {
     return {};
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<Array<PromiseSettledResult<R>>> {
+  const results = new Array<PromiseSettledResult<R>>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency, items.length));
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = {
+          status: "fulfilled",
+          value: await fn(items[index], index),
+        };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
