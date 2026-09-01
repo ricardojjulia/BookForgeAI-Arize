@@ -60,6 +60,8 @@ const REWRITE_PLAN_COMPLETION_TIMEOUT_MS =
 // the 45s client-side SDK timeout, which a real cloud-model call can exceed
 // on a slower model/tier. See src/lib/critic/run.ts for the incident this
 // pattern traces back to.
+// Must exceed BOOKFORGE_REWRITE_PLAN_TIMEOUT_MS (see below) or Vercel kills
+// the function before the model-call timeout it's meant to allow ever fires.
 export const maxDuration = 400;
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {

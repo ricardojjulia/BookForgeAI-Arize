@@ -38,6 +38,21 @@ type ArchitectureChapter = {
 // by the 10-minute stale-heartbeat sweep with no real error ever thrown.
 export const maxDuration = 780;
 const CHAPTER_COMPLETION_TIMEOUT_MS = 760_000;
+// A claimed chapter (status flipped planned -> generating, see the atomic
+// claim below) can be abandoned without ever reaching the catch block that
+// releases it -- not just a local dev crash, but Vercel's own maxDuration
+// kill mid-flight in production does the exact same thing: the platform
+// terminates the function outright, no code runs, nothing gets released.
+// A chapter stuck at "generating" then falls into a real gap: plannedChapters
+// (below) still treats it as eligible via isPlaceholderText, but the atomic
+// claim requires literally status==="planned" so it can never be reclaimed,
+// AND remainingChapters only counts status==="planned" so the job silently
+// reports itself "completed" with this chapter permanently un-drafted.
+// Found live: job d30bc889 on a fresh 6-chapter book completed with chapter
+// 6 stuck at "generating", 248 chars of placeholder text, forever
+// unclaimable. Threshold is comfortably above maxDuration -- no legitimate
+// single-chapter attempt can still be genuinely in flight past that, since
+// the platform itself would have already killed it.
 const CHAPTER_CLAIM_STALE_MS = 900_000;
 // Same fallback used by rewrite-execute's per-paragraph retry (that file's
 // REWRITE_FALLBACK_MODEL) -- retrying a failed cloud call against the exact
@@ -146,6 +161,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       original_text: string | null;
       updated_at: string | null;
     }>;
+    // Recover any chapter whose claim was abandoned (see CHAPTER_CLAIM_STALE_MS
+    // above) before computing plannedChapters/remainingChapters, so every
+    // downstream check sees the corrected status instead of needing its own
+    // special case for "generating" chapters.
     const staleGeneratingChapterIds = chapterRows
       .filter((chapter) => isStaleGeneratingChapter(chapter.status, chapter.updated_at))
       .map((chapter) => chapter.id);
@@ -540,6 +559,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       // Recomputed from a fresh read at the top of THIS request, so this
       // already reflects true current DB state -- chapters drafted by any
       // earlier chunk call are no longer "planned" by the time this query ran.
+      // Counting only "planned" here (not "generating") let this call mark
+      // the whole job "completed" while a DIFFERENT concurrent request (the
+      // self-chain, or the browser's own driver -- see the atomic-claim
+      // comment above) was still legitimately mid-flight on the very last
+      // chapter -- found live: job d30bc889 marked itself completed while
+      // chapter 6 was still being drafted by another in-flight request, ~96s
+      // before that chapter actually finished. "generating" always means not
+      // done yet, regardless of which request is holding the claim or
+      // whether that claim is stale (see CHAPTER_CLAIM_STALE_MS's separate
+      // recovery for the abandoned-claim case).
       const remainingChapters = Math.max(
         0,
         chapterRows.filter((chapter) => chapter.status === "planned" || chapter.status === "generating").length -

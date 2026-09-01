@@ -451,6 +451,17 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const anyRevisionParagraphIds = new Set(
       ((existingRevisions || []) as ExistingRevisionRow[]).map((revision) => revision.paragraph_id).filter(Boolean),
     );
+    // A paragraph this SAME job already drafted must never be picked again,
+    // regardless of rewriteExistingDrafts/rewriteAccepted -- those toggles
+    // mean "let a NEW pass revisit paragraphs from an OLDER job", not
+    // "let this job re-select the paragraph it just saved on the previous
+    // chunk." Without this, eligibility (re-derived fresh every chunk from
+    // durable state) sees the freshly-inserted revision_versions row as just
+    // another "existing draft" that the toggle explicitly allows back in,
+    // so the same paragraph gets reprocessed forever. Found live: job
+    // 186961d1-dceb-47ea-a9e1-82e5ee8e3ad6 landed 50 revision_versions rows
+    // for 1 distinct paragraph, with attempted climbing to 43+ of a
+    // totalUnits: 34 job.
     const currentJobDraftParagraphIds = new Set(
       ((existingRevisions || []) as ExistingRevisionRow[])
         .filter((revision) => revision.revision_job_id === jobId)

@@ -429,13 +429,15 @@ export async function updateRevisionJobProgress(
   settings: unknown,
   progress: Partial<AiJobProgress>,
 ) {
+  // A caller can pass a stale/empty settings object (e.g. a variable that
+  // never got reassigned after a prior update, or a fresh continuation that
+  // hasn't loaded the job yet) -- merging progress on top of that silently
+  // regresses or blanks out real fields (label text, failedUnits, etc.)
+  // instead of layering onto the job's actual current state. If the passed
+  // settings carry no usable progress, re-fetch the real current row first.
   let baseSettings = settings;
   if (!extractJobProgress(baseSettings)) {
-    const { data } = await supabase
-      .from("revision_jobs")
-      .select("settings")
-      .eq("id", jobId)
-      .maybeSingle();
+    const { data } = await supabase.from("revision_jobs").select("settings").eq("id", jobId).maybeSingle();
     baseSettings = data?.settings || baseSettings;
   }
 

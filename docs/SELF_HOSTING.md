@@ -26,6 +26,8 @@ it running, or understand exactly what each setting does.
 10. [Troubleshooting](#10-troubleshooting)
 11. [Data, privacy, and license](#11-data-privacy-and-license)
 
+See also: [docs/MULTIPASS_DEPLOY.md](MULTIPASS_DEPLOY.md) — a fully explicit, copy-pasteable walkthrough from an empty Multipass Ubuntu VM to a running instance.
+
 ---
 
 ## 1. What self-hosting means here
@@ -144,6 +146,8 @@ Open `http://localhost:4747`, create an account, and go to **Settings** to confi
 ## 8. Deploying for real, ongoing use
 
 For anything beyond local development — a server you leave running, a shared instance for a small team — you have a few options. All of them assume you've already run `supabase start`/`migration up` somewhere Supabase can stay running (your own server, or a [hosted Supabase project](https://supabase.com/dashboard) if you'd rather not manage Postgres yourself — either works, since BookForge only talks to Supabase over its standard API/connection string, not anything local-only).
+
+**Deploying to a fresh VM specifically?** [docs/MULTIPASS_DEPLOY.md](MULTIPASS_DEPLOY.md) is a fully explicit, copy-pasteable walkthrough from an empty [Multipass](https://canonical.com/multipass) Ubuntu VM through a running instance — every command, in order, including hardware sizing, installing Docker/Node/the Supabase CLI from scratch, and a systemd service. The rest of this section covers the same ground at a higher level, for any Linux server.
 
 **Production build:**
 

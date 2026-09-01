@@ -54,6 +54,26 @@ type CriticModelExecution = {
   modelPlan: Awaited<ReturnType<typeof selectAndPrepareActiveModel>>;
 };
 
+const DEFAULT_CLOUD_CRITIC_TIMEOUT_MS = 140_000;
+// Local execution needs a longer default than cloud: critic/all dispatches
+// every lens concurrently (see that route), and a local LM Studio instance
+// doesn't truly parallelize -- multiple simultaneous large-context critic
+// generations queue/contend for the same GPU, so a lens near the back of
+// that queue can still be legitimately waiting when the 140s cloud-tuned
+// budget would already have expired it. Confirmed live: 4 of 8 lenses in one
+// batch failed at exactly ~140.0s (model_call_events duration_ms 140013-
+// 140021) while the other 4 succeeded in 98-124s -- a real queueing effect,
+// not a connection/abort bug. See also critic/all's own concurrency cap,
+// which reduces how much queuing this has to absorb in the first place.
+const DEFAULT_LOCAL_CRITIC_TIMEOUT_MS = 300_000;
+
+function getCriticTimeoutMs(isCloud: boolean) {
+  const raw = process.env.BOOKFORGE_CRITIC_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  return isCloud ? DEFAULT_CLOUD_CRITIC_TIMEOUT_MS : DEFAULT_LOCAL_CRITIC_TIMEOUT_MS;
+}
+
 export async function preloadCriticRunContext(input: {
   supabase: SupabaseClient;
   bookId: string;

@@ -46,6 +46,17 @@ function getErrorMessage(
 // same residual risk already noted on critic/all and creation/architecture.
 export const maxDuration = 780;
 
+const DEFAULT_CHAPTER_SUMMARY_TIMEOUT_MS = 240_000;
+
+// Same hardcoded-timeout-too-short bug already found and fixed on
+// rewrite-plan and analyze (see those routes) -- this one was missed in
+// the same sweep. Env-configurable per the same reasoning.
+function getChapterSummaryTimeoutMs() {
+  const raw = process.env.BOOKFORGE_CHAPTER_SUMMARY_TIMEOUT_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_CHAPTER_SUMMARY_TIMEOUT_MS;
+}
+
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
   try {
     const { bookId } = await context.params;
@@ -234,7 +245,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           },
           undefined,
           telemetryContext,
-          { timeoutMs: 90_000 },
+          { timeoutMs: getChapterSummaryTimeoutMs() },
         );
 
         const raw = completion.choices[0]?.message.content || "{}";

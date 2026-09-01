@@ -18,6 +18,18 @@ const schema = z.object({
   metadataBranchName: z.string().min(1).max(80).optional(),
 });
 
+// A cloud provider genuinely parallelizes independent requests (separate
+// backend capacity per call), but a local LM Studio instance shares one
+// GPU/model regardless of how many HTTP connections it accepts -- dispatching
+// all 8 lenses at once just queues them behind each other, and a lens near
+// the back of that queue can still be legitimately waiting when its own
+// per-call timeout expires. Confirmed live: full unbounded concurrency
+// against a local model failed 4 of 8 lenses, each timing out at almost
+// exactly 140.0s while the other 4 (which actually got to run) finished in
+// 98-124s -- not a connection/abort bug, just self-inflicted queuing with no
+// throughput benefit locally. Capping concurrency for local execution avoids
+// that pileup; cloud keeps full concurrency since it doesn't have this
+// problem (see the "no ordering or drift concern" comment at the call site).
 const LOCAL_CRITIC_CONCURRENCY = 2;
 
 function getErrorMessage(error: unknown) {
@@ -30,12 +42,13 @@ function getErrorMessage(error: unknown) {
   return "BookForge Critic batch failed.";
 }
 
-// Runs up to 8 lenses sequentially in one invocation -- same undersized-
-// timeout risk as src/app/api/books/[bookId]/critic/route.ts (see that
-// file's comment), just multiplied. Near Vercel Pro's 800s ceiling; a real
-// worst-case run (every lens needing the full ~140s a slow cloud model can
-// take) can still exceed even this -- not fully solved by a bigger number,
-// same residual risk noted on the architecture route.
+// Runs up to 8 lenses in one invocation -- cloud concurrently, local capped
+// (see criticConcurrency below) -- same undersized-timeout risk as
+// src/app/api/books/[bookId]/critic/route.ts (see that file's comment), just
+// multiplied. Near Vercel Pro's 800s ceiling; a real worst-case run (every
+// lens needing the full per-call timeout) can still exceed even this -- not
+// fully solved by a bigger number, same residual risk noted on the
+// architecture route.
 export const maxDuration = 780;
 
 export async function POST(request: Request, context: { params: Promise<{ bookId: string }> }) {
@@ -157,10 +170,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     const preDispatchStatus = pauseStatus === "cancelled" ? "cancelled" : await getRevisionJobStatus(supabase, jobId);
 
     // All 8 lenses are independent, read-only evaluations of the same static
-    // context. Cloud providers can genuinely parallelize them, but a local LM
-    // Studio server usually shares one loaded model/GPU; cap local concurrency
-    // so late lenses do not spend most of their timeout waiting in provider
-    // queue. Shared state is still only touched in the sequential loop below.
+    // context -- unlike rewrite-execute's paragraphs, there's no ordering or
+    // drift concern, so cloud runs them fully concurrently. Local execution
+    // caps concurrency instead (see LOCAL_CRITIC_CONCURRENCY) since a single
+    // LM Studio instance can't actually parallelize that many large-context
+    // generations. Shared state (counters, job progress, failedUnits) is only
+    // ever touched in the plain sequential loop below, over already-settled
+    // results, so there's no race on the job row's progress column either way.
     jobSettings = await updateRevisionJobProgress(supabase, jobId, jobSettings, {
       currentUnit: `Running all ${lenses.length} critic lenses`,
       totalUnits: lenses.length,

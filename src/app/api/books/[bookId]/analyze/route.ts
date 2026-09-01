@@ -246,11 +246,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
             temperature: settings.temperature,
             top_p: settings.topP,
             messages: [{ role: "user", content: prompt }],
-          },
-          undefined,
-          telemetryContext,
-          { timeoutMs: ANALYZE_CHUNK_COMPLETION_TIMEOUT_MS },
-        );
+        },
+        undefined,
+        telemetryContext,
+        { timeoutMs: ANALYZE_CHUNK_COMPLETION_TIMEOUT_MS },
+      );
 
         const content = completion.choices[0]?.message.content || "{}";
         partials.push({
