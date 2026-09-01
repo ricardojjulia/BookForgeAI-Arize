@@ -31,6 +31,13 @@ export type BookForgeLlmTraceContext = {
   workflow?: string;
   attempt?: number;
   retry?: boolean;
+
+  /**
+   * Stable BookForge user identifier.
+   *
+   * Emitted only when BOOKFORGE_TRACE_USER_IDENTIFIERS=true.
+   */
+  userId?: string;
 };
 
 export type BookForgeLlmInputMetrics = {
@@ -38,6 +45,14 @@ export type BookForgeLlmInputMetrics = {
   inputChars?: number;
   estimatedInputTokens?: number;
   maxOutputTokens?: number;
+
+  /**
+   * Raw model input supplied by the managed LLM caller.
+   *
+   * This value is emitted only when BOOKFORGE_TRACE_CONTENT=true.
+   * The tracing layer owns that policy so callers never need to duplicate it.
+   */
+  inputValue?: unknown;
 };
 
 export type BookForgeLlmResultMetrics = {
@@ -49,6 +64,14 @@ export type BookForgeLlmResultMetrics = {
   costUsdMicros?: number;
   validationOutcome?: string;
   resolvedModel?: string;
+  finishReason?: string;
+
+  /**
+   * Raw model output.
+   *
+   * This value is emitted only when BOOKFORGE_TRACE_CONTENT=true.
+   */
+  outputValue?: string;
 };
 
 export type BookForgeLlmSpanController = {
@@ -64,9 +87,9 @@ export type BookForgeLlmSpanController = {
  * never prevent or alter the underlying model call, and the original model
  * error is always rethrown unchanged.
  *
- * Raw input/output content is intentionally unsupported in this foundation.
- * Content capture, if ever enabled, will be added behind the separate
- * BOOKFORGE_TRACE_CONTENT switch in a later reviewed change.
+ * Raw input/output content is optional and is emitted only when
+ * BOOKFORGE_TRACE_CONTENT=true. Metadata, usage, model identity, and status
+ * remain available regardless of the content-capture setting.
  */
 export async function withBookForgeLlmSpan<T>(
   context: BookForgeLlmTraceContext,
@@ -91,11 +114,23 @@ export async function withBookForgeLlmSpan<T>(
         "bookforge.model.resolved": context.model,
         "bookforge.attempt": context.attempt,
         "bookforge.retry": context.retry,
+        "bookforge.user_id":
+          traceUserIdentifiers() ? context.userId : undefined,
         "bookforge.message_count": inputMetrics.messageCount,
         "bookforge.input_chars": inputMetrics.inputChars,
         "bookforge.estimated_input_tokens": inputMetrics.estimatedInputTokens,
         "bookforge.max_output_tokens": inputMetrics.maxOutputTokens,
         "llm.model_name": context.model,
+
+        // OpenInference document-level input semantics. Raw content is
+        // intentionally gated here rather than at individual call sites.
+        "input.value": traceContent()
+          ? safeJsonStringify(inputMetrics.inputValue)
+          : undefined,
+        "input.mime_type":
+          traceContent() && inputMetrics.inputValue !== undefined
+            ? "application/json"
+            : undefined,
       }),
     });
   } catch {
@@ -140,6 +175,17 @@ function createController(span: Span): BookForgeLlmSpanController {
             "bookforge.output_words": metrics.outputWords,
             "bookforge.cost_usd_micros": metrics.costUsdMicros,
             "bookforge.validation": metrics.validationOutcome,
+            "bookforge.finish_reason": metrics.finishReason,
+
+            // Phoenix / OpenInference first-class LLM output semantics.
+            "output.value":
+              traceContent() && metrics.outputValue !== undefined
+                ? metrics.outputValue
+                : undefined,
+            "output.mime_type":
+              traceContent() && metrics.outputValue !== undefined
+                ? "text/plain"
+                : undefined,
           }),
         );
       });
@@ -158,6 +204,26 @@ function compactAttributes(
   return Object.fromEntries(
     Object.entries(values).filter((entry): entry is [string, string | number | boolean] => entry[1] !== undefined),
   );
+}
+
+function traceContent() {
+  return process.env.BOOKFORGE_TRACE_CONTENT === "true";
+}
+
+function traceUserIdentifiers() {
+  return process.env.BOOKFORGE_TRACE_USER_IDENTIFIERS === "true";
+}
+
+function safeJsonStringify(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    // Content capture is advisory. Serialization problems must never affect
+    // the underlying BookForge model operation.
+    return undefined;
+  }
 }
 
 function sanitizeSpanSegment(value: string) {

@@ -160,7 +160,9 @@ typically creates `amd64` VMs — this command handles either):
 
 ```bash
 ARCH=$(dpkg --print-architecture)
-curl -fsSL "https://github.com/supabase/cli/releases/latest/download/supabase_linux_${ARCH}.deb" -o supabase.deb
+TAG=$(curl -fsSL https://api.github.com/repos/supabase/cli/releases/latest | node -pe 'JSON.parse(require("fs").readFileSync(0, "utf8")).tag_name')
+VERSION=${TAG#v}
+curl -fsSL "https://github.com/supabase/cli/releases/download/${TAG}/supabase_${VERSION}_linux_${ARCH}.deb" -o supabase.deb
 sudo dpkg -i supabase.deb
 rm supabase.deb
 ```

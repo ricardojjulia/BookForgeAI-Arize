@@ -4,6 +4,7 @@ export type { LmStudioTaskKind } from "@/lib/types";
 import type {
   BookForgeLlmExecution,
   BookForgeLlmProvider,
+  BookForgeLlmSpanController,
 } from "@/lib/observability/llm-span";
 import { withBookForgeLlmSpan } from "@/lib/observability/llm-span";
 import {
@@ -334,6 +335,7 @@ export async function createManagedChatCompletion(
       workflow: telemetryContext.workflow,
       attempt: telemetryContext.attempt ?? 1,
       retry: telemetryContext.retry ?? false,
+      userId: telemetryContext.userId,
     },
     async (llmSpan) => executeManagedChatCompletion(llmSpan),
     {
@@ -348,21 +350,12 @@ export async function createManagedChatCompletion(
       ),
       estimatedInputTokens: estimatePromptTokens(params.messages),
       maxOutputTokens,
+      inputValue: params.messages,
     },
   );
 
   async function executeManagedChatCompletion(
-    llmSpan?: {
-      addEvent(name: string, attributes?: Record<string, string | number | boolean>): void;
-      setResult(metrics: {
-        promptTokens?: number;
-        completionTokens?: number;
-        totalTokens?: number;
-        outputChars?: number;
-        outputWords?: number;
-        resolvedModel?: string;
-      }): void;
-    },
+    llmSpan?: BookForgeLlmSpanController,
   ) {
     try {
       const paramsWithoutTopP = Object.fromEntries(
@@ -407,6 +400,8 @@ export async function createManagedChatCompletion(
         outputWords: content.trim()
           ? content.trim().split(/\s+/).filter(Boolean).length
           : 0,
+        outputValue: content,
+        finishReason: completion.choices[0]?.finish_reason || undefined,
       });
       void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
       return completion;
@@ -461,6 +456,8 @@ export async function createManagedChatCompletion(
           outputWords: retryContent.trim()
             ? retryContent.trim().split(/\s+/).filter(Boolean).length
             : 0,
+          outputValue: retryContent,
+          finishReason: completion.choices[0]?.finish_reason || undefined,
         });
         void recordCompletionOutcome(prepared, completion, validateOutcome, telemetryContext, Date.now() - startedAt, reservation);
         return completion;

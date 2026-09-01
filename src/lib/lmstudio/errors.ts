@@ -32,6 +32,17 @@ export function getLmStudioErrorMessage(
     ].join(" ");
   }
 
+  if (/No LM Runtime found for model format/i.test(message) || /torchSafetensors/i.test(message)) {
+    return [
+      "LM Studio cannot load the selected model because its file format is not supported by the installed LM Runtime.",
+      modelLine,
+      taskLine,
+      sourceLine,
+      configuredLine,
+      "Use a GGUF or another LM Studio-compatible chat/instruct model, or load an already-compatible model in LM Studio and select it in Settings.",
+    ].join(" ");
+  }
+
   if (/model.*not.*found|not found.*model|unknown model/i.test(message)) {
     return [
       "LM Studio could not find the selected model.",

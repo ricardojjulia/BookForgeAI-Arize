@@ -49,7 +49,11 @@ export async function runChunkedJob(
   for (let call = 0; call < MAX_CHUNK_CALLS; call += 1) {
     const response = await fetchJson<{ content?: ChunkedJobResult; ok?: boolean; message?: string }>(
       path,
-      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, jobId }) },
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...body, jobId, externalDriver: true }),
+      },
       `${label} (chunk ${call + 1})`,
     );
 
