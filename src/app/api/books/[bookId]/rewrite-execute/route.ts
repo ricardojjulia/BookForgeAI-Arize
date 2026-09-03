@@ -428,7 +428,6 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
     let skippedExistingDrafts = 0;
     let skippedAccepted = 0;
     let skippedPreviouslyFailed = 0;
-    let alreadyDraftedByThisJob = 0;
     let jobSettings: unknown = {
       model,
       rewriteModelSelection: rewriteSelection,
@@ -527,7 +526,13 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           continue;
         }
         if (currentJobDraftParagraphIds.has(paragraph.id)) {
-          alreadyDraftedByThisJob += 1;
+          // Already drafted by an earlier chunk of THIS job -- completed
+          // work, already reflected in `rewritten`/ok above. Must still be
+          // excluded from re-selection (see comment on
+          // currentJobDraftParagraphIds), but counting it as "skipped" here
+          // double-counts every finished paragraph on each subsequent
+          // chunk's whole-book re-scan, e.g. "25 ok - 25 skipped" for a job
+          // that has only actually skipped 0 paragraphs.
           continue;
         }
         if (!body.rewriteExistingDrafts && pendingDraftParagraphIds.has(paragraph.id)) {
@@ -1045,7 +1050,6 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           skippedExistingDrafts,
           skippedAccepted,
           skippedPreviouslyFailed,
-          alreadyDraftedByThisJob,
           totalUnits,
           remainingUnits,
           status: "running",
@@ -1083,7 +1087,6 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           skippedExistingDrafts,
           skippedAccepted,
           skippedPreviouslyFailed,
-          alreadyDraftedByThisJob,
           retryJobId: body.retryJobId || null,
           warningCount: warnings.length,
           progress: buildJobProgress({
@@ -1163,7 +1166,6 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         skippedExistingDrafts,
         skippedAccepted,
         skippedPreviouslyFailed,
-        alreadyDraftedByThisJob,
         continuityWarnings: warnings.slice(0, 100),
         startedAt: priorProgress?.startedAt || startedAt,
         completedAt,
@@ -1183,7 +1185,6 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         skippedExistingDrafts,
         skippedAccepted,
         skippedPreviouslyFailed,
-        alreadyDraftedByThisJob,
         totalUnits,
         remainingUnits: 0,
         continuityWarningCount: warnings.length,

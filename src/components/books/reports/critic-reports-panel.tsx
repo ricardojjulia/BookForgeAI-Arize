@@ -94,7 +94,7 @@ export function CriticReportsPanel({ bookId, reports }: { bookId: string; report
                             {typeof score === "number" && <Badge color="teal">Score {score}</Badge>}
                           </Group>
                           <Text size="sm" c="dimmed">
-                            {new Date(report.created_at).toLocaleString()}
+                            <span suppressHydrationWarning>{new Date(report.created_at).toLocaleString()}</span>
                           </Text>
                         </Stack>
                       </Group>

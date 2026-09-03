@@ -104,7 +104,7 @@ export async function buildCriticAllPreflight(input: {
     targetTokensPerCall: plan.targetTokensPerCall,
     usableContextTokens: runtimeLimits?.usableInputTokens || plan.usableContextTokens,
     estimatedSecondsPerCall: plan.estimatedSecondsPerCall,
-    estimatedTotalSeconds: plan.estimatedTotalSeconds,
+    estimatedTotalSeconds: plan.estimatedSecondsPerCall * CRITIC_LENS_COUNT,
     unitStrategy: plan.unitStrategy,
     modelSizeB: plan.modelSizeB,
     quantization: plan.quantization,

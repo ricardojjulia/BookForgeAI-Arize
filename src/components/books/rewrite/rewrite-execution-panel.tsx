@@ -603,7 +603,8 @@ export function RewriteExecutionPanel({
         </Alert>
         {latestJob && (
           <Alert color="grape">
-            Latest rewrite job: {latestJob.status || "unknown"} · created {new Date(latestJob.created_at).toLocaleString()}
+            Latest rewrite job: {latestJob.status || "unknown"} · created{" "}
+            <span suppressHydrationWarning>{new Date(latestJob.created_at).toLocaleString()}</span>
             {typeof latestJob.settings?.rewritten === "number" ? ` · ${latestJob.settings.rewritten} rewritten` : ""}
           </Alert>
         )}
@@ -985,7 +986,7 @@ function PersistentRewriteCampaignPanel({
               {goalLabel} · {campaign.batches_run} batch{campaign.batches_run === 1 ? "" : "es"} run · batch size {campaign.batch_size}
             </Text>
             <Text size="xs" c="dimmed">
-              Last updated {new Date(campaign.updated_at).toLocaleString()}
+              Last updated <span suppressHydrationWarning>{new Date(campaign.updated_at).toLocaleString()}</span>
             </Text>
           </div>
           <Badge color={campaignStatusColor(campaign.status)} variant="light">
@@ -1094,7 +1095,8 @@ function CampaignHealthPanel({
           </Text>
           {latestDriftReport && (
             <Text size="xs" c="dimmed">
-              Latest drift check: {new Date(latestDriftReport.created_at).toLocaleString()}
+              Latest drift check:{" "}
+              <span suppressHydrationWarning>{new Date(latestDriftReport.created_at).toLocaleString()}</span>
             </Text>
           )}
         </div>
@@ -1152,7 +1154,7 @@ function CampaignBatchHistory({ bookId, jobs }: { bookId: string; jobs: Campaign
             <Group key={job.id} justify="space-between">
               <div>
                 <Text size="sm" fw={700}>
-                  Batch {jobs.length - index} · {new Date(job.created_at).toLocaleString()}
+                  Batch {jobs.length - index} · <span suppressHydrationWarning>{new Date(job.created_at).toLocaleString()}</span>
                 </Text>
                 <Text size="xs" c="dimmed">
                   {rewritten} rewritten · {skipped} skipped · {failed} failed
@@ -1757,7 +1759,7 @@ function GuidedRewriteRun({
             </Text>
             {workflow.updated_at && (
               <Text size="xs" c="dimmed" mt={4}>
-                Saved workflow updated {new Date(workflow.updated_at).toLocaleString()}.
+                Saved workflow updated <span suppressHydrationWarning>{new Date(workflow.updated_at).toLocaleString()}</span>.
               </Text>
             )}
           </Alert>
