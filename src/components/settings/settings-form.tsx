@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Button,
   Group,
   NumberInput,
@@ -603,13 +604,12 @@ export function SettingsForm({
                   }}
                 />
                 {providerModelOptions ? (
-                  <Select
+                  <Autocomplete
                     label="Model"
                     description="Choose a preset or type a custom model ID"
                     data={providerModelOptions}
                     value={settings.llm_model || providerModelOptions[0]?.value}
-                    onChange={(value) => update("llm_model", value || "")}
-                    searchable
+                    onChange={(value) => update("llm_model", value)}
                   />
                 ) : (
                   <TextInput
@@ -735,14 +735,13 @@ export function SettingsForm({
                     <SimpleGrid cols={{ base: 1, md: 2 }}>
                       {TASK_INFO.map(({ field, label, hint }) =>
                         providerModelOptions ? (
-                          <Select
+                          <Autocomplete
                             key={field}
                             label={label}
                             description={hint}
                             data={providerModelOptions}
                             value={(settings[field] as string) || settings.llm_model || providerModelOptions[0]?.value}
-                            onChange={(value) => update(field, (value || "") as Settings[typeof field])}
-                            searchable
+                            onChange={(value) => update(field, value as Settings[typeof field])}
                           />
                         ) : (
                           <TextInput

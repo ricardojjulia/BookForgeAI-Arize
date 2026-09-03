@@ -381,7 +381,6 @@ export function BookActions({
             ? "primaryRewriteModel"
             : "extractionModel";
       const configured = status.configuredModels.find((item) => item.key === modelKey);
-      const selectedModel = configured?.model || "";
       const runtimeTask =
         task === "auto-review" || task === "critic" || task === "critic-all"
           ? "critic"
@@ -398,6 +397,12 @@ export function BookActions({
         status.cloudProvider?.model &&
           (runtimeTask === "rewrite" ? status.cloudProvider.usedForRewrite : status.cloudProvider.usedForPlanning),
       );
+      // configured.model only reflects the LM Studio task-assignment field, so it's
+      // empty for accounts running a cloud provider even when that provider is fully
+      // configured and about to be used -- fall back to the active cloud model so the
+      // preflight doesn't display "Not configured" and warn about a model that was
+      // never going to be used for this call.
+      const selectedModel = configured?.model || (isCloudReadyForTask ? status.cloudProvider?.model || "" : "");
       const runtimeLimits = status.runtimeLimits?.[runtimeTask] || status.runtimeLimits?.planning;
       const plan = estimateAiCallPlan({
         task: task === "critic" || task === "critic-all" || task === "auto-review" ? "critic" : "book-bible",
@@ -1880,8 +1885,16 @@ function formatResultMessage(path: string, result: { content?: Record<string, un
   }
 
   if (path.includes("/generate-draft")) {
-    const generated = result.content?.generated;
-    const remaining = result.content?.remaining;
+    // totalGenerated is the cumulative count across every chunked call this
+    // run made; generated (from the raw final API response) only reflects
+    // the last individual call, which is 0 once that call is just a
+    // terminating "nothing left to draft" check -- prefer the cumulative
+    // figure so a fully successful run doesn't report "Drafted 0 chapter(s)".
+    const generated = result.content?.totalGenerated ?? result.content?.generated;
+    // The API's actual field is remainingChapters, not remaining -- this
+    // lookup always returned undefined, so the "N planned chapter(s)
+    // remaining" half of the message never rendered.
+    const remaining = result.content?.remainingChapters ?? result.content?.remaining;
     return `Planned draft generated.${typeof generated === "number" ? ` Drafted ${generated} chapter(s).` : ""}${
       typeof remaining === "number" ? ` ${remaining} planned chapter(s) remaining.` : ""
     }`;

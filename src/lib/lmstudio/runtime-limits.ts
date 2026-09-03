@@ -26,14 +26,14 @@ export function getLmStudioRuntimeLimits(
   const warnings = [
     ...(settings.maxOutputTokens > maxOutputTokens
       ? [
-          `Max output was clamped from ${settings.maxOutputTokens.toLocaleString()} to ${maxOutputTokens.toLocaleString()} tokens for this task so LM Studio keeps enough room for the prompt.`,
+          `Max output was clamped from ${settings.maxOutputTokens.toLocaleString()} to ${maxOutputTokens.toLocaleString()} tokens for this task so there's enough room left for the prompt.`,
         ]
       : []),
     ...(configuredContextTokens < 8192
-      ? ["Loaded context is small. BookForge will use compact prompts and smaller rewrite units."]
+      ? ["Configured context is small. BookForge will use compact prompts and smaller rewrite units."]
       : []),
     ...(configuredContextTokens < 16384 && task !== "rewrite"
-      ? ["For book-level planning and Critic work, a 16k+ loaded context is strongly recommended in LM Studio."]
+      ? ["For book-level planning and Critic work, a 16k+ context window is strongly recommended."]
       : []),
   ];
 

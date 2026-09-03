@@ -439,7 +439,7 @@ export function CreateBookWizard({ existingProject }: { existingProject?: Existi
           <Title order={3}>Resume in-progress book?</Title>
           <Text c="dimmed" size="sm">
             You have an unfinished project, <strong>{existingProject.workingTitle || "Untitled"}</strong>, last updated{" "}
-            {new Date(existingProject.updatedAt).toLocaleString()}.
+            <span suppressHydrationWarning>{new Date(existingProject.updatedAt).toLocaleString()}</span>.
             {hasArchitecture
               ? " It already has a generated chapter architecture ready to review and accept -- no need to regenerate anything."
               : hasConcept

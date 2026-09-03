@@ -33,7 +33,7 @@ async function readResponseJson(response: Response, label: string) {
   try {
     return JSON.parse(text);
   } catch {
-    const contentType = response.headers.get("content-type") || "";
+    const contentType = response.headers.get("content-type") ?? "";
     if (contentType.includes("text/html") || looksLikeHtmlDocument(text)) {
       return {
         error: `${label} failed with HTTP ${response.status}: the server returned an HTML error page instead of JSON. Check server logs for the underlying error.`,
