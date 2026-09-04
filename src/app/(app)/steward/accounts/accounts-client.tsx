@@ -101,6 +101,25 @@ export function StewardAccountsClient({ initialAccounts, currentUserId }: { init
     }
   }
 
+  async function resetCredits(accountId: string) {
+    setActionLoading(accountId);
+    setError("");
+    setMessage("");
+    try {
+      const result = await fetchJson<{ ok: boolean; balanceUsdMicros: number }>(
+        `/api/steward/accounts/${accountId}/reset-credits`,
+        { method: "POST" },
+        "Reset AI credits",
+      );
+      setMessage(`AI credits reset to $${(result.balanceUsdMicros / 1_000_000).toFixed(2)}.`);
+      await load(search);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to reset AI credits.");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function extend(accountId: string) {
     setActionLoading(accountId);
     setError("");
@@ -256,6 +275,15 @@ export function StewardAccountsClient({ initialAccounts, currentUserId }: { init
                       Start deletion
                     </Button>
                   )}
+                  <Button
+                    size="xs"
+                    color="teal"
+                    variant="light"
+                    loading={actionLoading === account.id}
+                    onClick={() => resetCredits(account.id)}
+                  >
+                    Reset AI credits
+                  </Button>
                   {!isSelf && (
                     <Button
                       size="xs"

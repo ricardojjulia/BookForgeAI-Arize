@@ -92,7 +92,19 @@ export function buildResumeBody(job: Pick<ChunkedJobRow, "id" | "mode" | "settin
   if (job.mode === "full_book_rewrite") {
     return {
       jobId: job.id,
-      maxUnits: settings.maxUnits,
+      // Uncapped jobs (e.g. "Rewrite this chapter") store maxUnits as null
+      // (see `body.maxUnits || null` at the route's job-settings writes) --
+      // every other nullable field here already normalizes null to
+      // undefined so the resumed request matches what a fresh, uncapped
+      // request looks like. maxUnits was missing that, so every automated
+      // resume of an uncapped job sent a literal `maxUnits: null`, which
+      // the route's Zod schema (number().optional(), not nullable) rejects
+      // outright -- silently failing on every single cron/backstop resume
+      // attempt for exactly the jobs most likely to need one (multi-chunk,
+      // no explicit cap). Found live: a job stuck at 25/47 units, cron
+      // resuming it every 2 minutes for 13+ minutes, every attempt dying on
+      // this same ZodError before ever reaching the actual rewrite logic.
+      maxUnits: settings.maxUnits ?? undefined,
       campaignId: settings.campaignId ?? undefined,
       // Chapter-scoped rewrites (e.g. Guidance's "Run rewrite" on a
       // chapter-specific suggestion) must stay scoped on resume too --
