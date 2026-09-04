@@ -815,13 +815,30 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           // why a real full-book rewrite never progressed past its first
           // chunk despite this self-chain already being in place.
           const continuationBody = JSON.stringify({ jobId: body.jobId, mode: body.mode });
-          after(() =>
-            fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
-              method: "POST",
-              headers: { "Content-Type": "application/json", cookie },
-              body: continuationBody,
-            }).catch(() => {}),
-          );
+          // Was `.catch(() => {})` -- swallowed every outcome (network error
+          // or non-OK response alike) with zero trace anywhere. Same gap as
+          // generate-draft had (see PR #233): confirmed live 2026-09-04 that
+          // this exact same-route self-chain pattern gets killed by Vercel's
+          // own infinite-loop protection (HTTP 508) once it decides this
+          // function is calling itself too many times. Logging the real
+          // outcome to auto_review_jobs.log surfaces it in the Auto-Review
+          // Wizard UI (see auto-review-runner.tsx's log rendering) instead of
+          // a silent stall.
+          after(async () => {
+            try {
+              const res = await fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
+                method: "POST",
+                headers: { "Content-Type": "application/json", cookie },
+                body: continuationBody,
+              });
+              if (!res.ok) {
+                await updateJob({ logEntry: { type: "self_chain_failed", message: `Self-chain continuation returned HTTP ${res.status}.` } }).catch(() => {});
+              }
+            } catch (chainError) {
+              const message = chainError instanceof Error ? chainError.message : String(chainError);
+              await updateJob({ logEntry: { type: "self_chain_failed", message: `Self-chain continuation failed: ${message}` } }).catch(() => {});
+            }
+          });
           return NextResponse.json({ ok: true, jobId: body.jobId, checkpointed: true, nextStage: stage });
         }
         throw error;
@@ -838,13 +855,23 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       // requiring the user to notice a stall and click Resume by hand.
       if (stageIndex < stageOrder.length && Date.now() - requestStartedAt > SELF_CONTINUE_AFTER_MS) {
         const continuationBody = JSON.stringify({ jobId: body.jobId, mode: body.mode });
-        after(() =>
-          fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
-            method: "POST",
-            headers: { "Content-Type": "application/json", cookie },
-            body: continuationBody,
-          }).catch(() => {}),
-        );
+        // Same failure-visibility fix as the checkpoint above -- see that
+        // comment for why the swallowed `.catch(() => {})` mattered.
+        after(async () => {
+          try {
+            const res = await fetch(new URL(`/api/books/${bookId}/auto-review/process`, baseUrl).toString(), {
+              method: "POST",
+              headers: { "Content-Type": "application/json", cookie },
+              body: continuationBody,
+            });
+            if (!res.ok) {
+              await updateJob({ logEntry: { type: "self_chain_failed", message: `Self-chain continuation returned HTTP ${res.status}.` } }).catch(() => {});
+            }
+          } catch (chainError) {
+            const message = chainError instanceof Error ? chainError.message : String(chainError);
+            await updateJob({ logEntry: { type: "self_chain_failed", message: `Self-chain continuation failed: ${message}` } }).catch(() => {});
+          }
+        });
         return NextResponse.json({ ok: true, jobId: body.jobId, checkpointed: true, nextStage: stageOrder[stageIndex] });
       }
     }

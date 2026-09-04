@@ -49,6 +49,7 @@ type PersistedAiJob = {
 type JobsResponse = {
   content?: {
     jobs: PersistedAiJob[];
+    transient?: boolean;
   };
 };
 
@@ -77,6 +78,14 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
   const loadJobs = useCallback(async () => {
     try {
       const result = await fetchJson<JobsResponse>(`/api/books/${bookId}/jobs`, { cache: "no-store" }, "Load AI jobs");
+      if (result.content?.transient) {
+        // A transient backend hiccup (see isTransientJsonParseError server-side)
+        // reports an empty job list with 200 OK rather than throwing -- treating
+        // that as ground truth would flash "No persistent AI jobs" over a
+        // genuinely running job and hide its Cancel button. Keep showing the
+        // last known jobs and let the next poll retry.
+        return jobs.some((job) => ["running", "paused", "queued"].includes(job.status || ""));
+      }
       const nextJobs = result.content?.jobs || [];
       const hasActiveJobs = nextJobs.some((job) => ["running", "paused", "queued"].includes(job.status || ""));
       const shouldRefresh = nextJobs.some((job) => {
@@ -100,7 +109,7 @@ export function PersistentAiJobsPanel({ bookId }: { bookId: string }) {
       // Back off when polling fails to avoid hammering the jobs endpoint.
       return false;
     }
-  }, [bookId, router]);
+  }, [bookId, router, jobs]);
 
   async function controlJob(jobId: string, action: "pause" | "resume" | "cancel" | "mark_failed") {
     setLoadingAction(`${action}:${jobId}`);

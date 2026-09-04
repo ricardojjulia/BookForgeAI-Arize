@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
-import { buildJobProgress, createRevisionJobHeartbeat, extractJobProgress, getRevisionJobStatus, type AiJobProgress, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, extractJobProgress, getRevisionJobStatus, mergeJobSettings, type AiJobProgress, updateRevisionJobProgress, waitWhileRevisionJobPaused } from "@/lib/ai/job-state";
 import { buildCloudRewriteModelSelection, selectBestRewriteModel } from "@/lib/ai/rewrite-model-suitability";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -26,6 +26,19 @@ import { resolveRequestAuth } from "@/lib/ai/cron-auth";
 // full-book rewrite job's heartbeat went stale on unit 1 of 25.
 export const maxDuration = 400;
 const REWRITE_UNIT_COMPLETION_TIMEOUT_MS = 120_000;
+// Vercel's own infinite-loop protection (HTTP 508 "Infinite loop detected")
+// kills the self-chain below once it decides this function is calling
+// itself too many times -- confirmed live 2026-09-04 on generate-draft's
+// identical self-chain pattern (trip point varied: 6, 6, then 12 hops
+// across three real runs, so no fixed hop count is safe). Processing exactly
+// one chapter-bounded chunk per invocation means a long rewrite job can need
+// dozens of self-chain hops; batching several chunks into one invocation
+// (still never spanning chapters within a single concurrent
+// Promise.allSettled batch -- see the chunk-building comment below) cuts
+// that hop count for the common case where chunks finish quickly. This only
+// gates STARTING an additional chunk, so a slow first chunk still gets its
+// full worst-case allowance untouched.
+const CHUNK_BATCH_TIME_BUDGET_MS = 180_000;
 
 // Same low cost tier as the default rewrite model (deepseek/deepseek-v4-pro)
 // but a different provider -- see the "Rewrite-pass alternate to DeepSeek V4
@@ -750,12 +763,22 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
       });
 
     let chunkProcessedCount = 0;
-    if (eligibleUnits.length > 0 && !hardError) {
+    const batchStartedAt = Date.now();
+    // Batched, time-boxed: loop building and processing chapter-bounded
+    // chunks off the front of eligibleUnits (see CHUNK_BATCH_TIME_BUDGET_MS
+    // above) instead of handling exactly one and returning. Each iteration
+    // still independently builds a same-chapter-only leading run below, so
+    // the "never span chapters in a concurrent batch" rule holds regardless
+    // of how many iterations this invocation ends up running.
+    while (eligibleUnits.length > 0 && !hardError) {
+      if (chunkProcessedCount > 0 && Date.now() - batchStartedAt >= CHUNK_BATCH_TIME_BUDGET_MS) break;
       await logDiag("diag_chunk_block_entered", `eligibleUnits=${eligibleUnits.length}`);
       const pauseStatus = await waitWhileRevisionJobPaused(supabase, jobId);
       const currentStatus = pauseStatus === "cancelled" ? "cancelled" : await getRevisionJobStatus(supabase, jobId);
 
-      if (currentStatus !== "cancelled") {
+      if (currentStatus === "cancelled") break;
+
+      {
         // Never let a chunk span two chapters: chapters are rewritten strictly one
         // after another (chapter N fully finishes before N+1 starts) to preserve
         // paragraph-to-paragraph and chapter-to-chapter drift/consistency. Only
@@ -768,6 +791,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
         ) {
           chunk.push(eligibleUnits[chunk.length]);
         }
+        // Consume this chunk off the front now so the next batch iteration
+        // (if any) naturally starts from the next unprocessed unit -- whether
+        // that's a fresh chapter or more of this same chapter's paragraphs
+        // past the CONCURRENCY cap.
+        eligibleUnits.splice(0, chunk.length);
         // Atomic claim: same class of race as generate-draft's chapter-status
         // claim (see that route's "Atomic claim" comment, and the migration
         // 202608280003_paragraph_rewrite_claim.sql). This route self-chains
@@ -794,7 +822,7 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           if (claimError) throw claimError;
           if (claimRows && claimRows.length > 0) claimedChunk.push(unit);
         }
-        chunkProcessedCount = claimedChunk.length;
+        chunkProcessedCount += claimedChunk.length;
         await logDiag("diag_chunk_built", `chunkSize=${chunk.length} claimed=${claimedChunk.length}`);
 
         const releaseClaim = (paragraphId: string) =>
@@ -945,7 +973,12 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
 
     if (hardError) throw hardError;
 
-    const remainingUnits = Math.max(0, eligibleUnits.length - chunkProcessedCount);
+    // eligibleUnits already had each processed chunk spliced off as the
+    // batch loop consumed it (see the splice above), so what's left in the
+    // array IS the true remaining count -- unlike chunkProcessedCount, this
+    // already accounts for a cancelled-mid-batch break leaving whole
+    // never-attempted chunks in place.
+    const remainingUnits = eligibleUnits.length;
     const statusAfterChunk = await getRevisionJobStatus(supabase, jobId);
     const isCancelledAfterChunk = statusAfterChunk === "cancelled";
 
@@ -1006,6 +1039,25 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
           error_signature: `scheduled remainingUnits=${remainingUnits}`,
           event_type: "self_chain_scheduled",
         });
+        // Persists onto the job row's own progress.message (in addition to
+        // the model_call_events diagnostic row above) -- that's the field
+        // PersistentAiJobsPanel already renders as a visible Alert on the
+        // job card, so a self-chain failure (Vercel's infinite-loop
+        // protection included -- see CHUNK_BATCH_TIME_BUDGET_MS above) shows
+        // up to the user directly instead of only being queryable in a table
+        // nobody but an engineer would think to check.
+        const recordSelfChainFailure = async (message: string) => {
+          try {
+            const { data: row } = await supabase.from("revision_jobs").select("settings").eq("id", jobId).single();
+            const existingProgress = extractJobProgress(row?.settings) || buildJobProgress({});
+            await supabase
+              .from("revision_jobs")
+              .update({ settings: mergeJobSettings(row?.settings, { ...existingProgress, message }) })
+              .eq("id", jobId);
+          } catch {
+            // best effort only -- the model_call_events row above already ran
+          }
+        };
         after(async () => {
           try {
             const res = await fetch(selfUrl.toString(), {
@@ -1023,7 +1075,11 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
               error_signature: `fetch resolved status=${res.status}`,
               event_type: "self_chain_fetch_resolved",
             });
+            if (!res.ok) {
+              await recordSelfChainFailure(`Self-chain continuation returned HTTP ${res.status}.`);
+            }
           } catch (chainError) {
+            const message = getErrorMessage(chainError);
             await supabase.from("model_call_events").insert({
               user_id: user.id,
               job_id: jobId,
@@ -1031,9 +1087,10 @@ export async function POST(request: Request, context: { params: Promise<{ bookId
               task: "rewrite_self_chain",
               context_length: 0,
               outcome: "error",
-              error_signature: `fetch threw: ${getErrorMessage(chainError)}`,
+              error_signature: `fetch threw: ${message}`,
               event_type: "self_chain_fetch_threw",
             });
+            await recordSelfChainFailure(`Self-chain continuation failed: ${message}`);
           }
         });
       }

@@ -1,8 +1,9 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { buildCreationDraftChapterPrompt } from "@/lib/creation/draft-prompt";
-import { createRevisionJobHeartbeat, extractJobProgress, mergeJobSettings, type AiJobProgress, updateRevisionJobProgress } from "@/lib/ai/job-state";
+import { buildJobProgress, createRevisionJobHeartbeat, extractJobProgress, mergeJobSettings, type AiJobProgress, updateRevisionJobProgress } from "@/lib/ai/job-state";
 import { resolveRequestAuth } from "@/lib/ai/cron-auth";
 import { createManagedChatCompletion } from "@/lib/lmstudio/client";
 import { getLmStudioErrorMessage } from "@/lib/lmstudio/errors";
@@ -38,6 +39,18 @@ type ArchitectureChapter = {
 // by the 10-minute stale-heartbeat sweep with no real error ever thrown.
 export const maxDuration = 780;
 const CHAPTER_COMPLETION_TIMEOUT_MS = 760_000;
+// Vercel's own infinite-loop protection (HTTP 508 "Infinite loop detected")
+// kills the self-chain below once it decides this function is calling
+// itself too many times -- confirmed live 2026-09-04, trip point varied
+// (6, 6, then 12 self-chain hops across three real runs), so no fixed hop
+// count is safe. Drafting exactly one chapter per invocation (as this used
+// to) means a 15-chapter book needs up to 14 self-chain hops; batching
+// several chapters into one invocation cuts that dramatically in the common
+// case (chapters actually take ~80-140s against a 760s worst-case ceiling),
+// without weakening the per-chapter safety margin: this only gates STARTING
+// an additional chapter, so a slow first chapter still gets its full
+// worst-case allowance untouched, same as before this change.
+const CHAPTER_BATCH_TIME_BUDGET_MS = 400_000;
 // A claimed chapter (status flipped planned -> generating, see the atomic
 // claim below) can be abandoned without ever reaching the catch block that
 // releases it -- not just a local dev crash, but Vercel's own maxDuration
@@ -71,6 +84,23 @@ const schema = z.object({
   // Set only by the resume-stale-chunked-jobs cron -- see resolveRequestAuth.
   actingUserId: z.string().uuid().optional(),
 });
+
+// Best-effort breadcrumb for a failed self-chain continuation -- read fresh
+// rather than trust closure state, since this runs from inside after() after
+// the triggering request's own response has already gone out. Never throws:
+// a failure to record the failure shouldn't mask the failure itself in logs.
+async function recordSelfChainFailure(supabase: SupabaseClient, jobId: string, message: string) {
+  try {
+    const { data: row } = await supabase.from("revision_jobs").select("settings").eq("id", jobId).single();
+    const existingProgress = extractJobProgress(row?.settings) || buildJobProgress({});
+    await supabase
+      .from("revision_jobs")
+      .update({ settings: mergeJobSettings(row?.settings, { ...existingProgress, message }) })
+      .eq("id", jobId);
+  } catch {
+    // best effort only -- console.error at the call site already ran
+  }
+}
 
 function getErrorMessage(error: unknown, context: { model?: string; task?: string; modelSource?: string; configuredModels?: string[] } = {}) {
   const lmStudioMessage = getLmStudioErrorMessage(error, "", context);
@@ -314,14 +344,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
     let successCount = priorProgress?.successful ?? 0;
 
     try {
-      // Exactly one chapter per request -- never the full plannedChapters
-      // list -- so a single HTTP request can't run long enough to hit
-      // Vercel's function timeout generating a whole book's worth of
-      // chapters. The caller (runChunkedJob) calls this route again with the
-      // same jobId while remainingChapters > 0; plannedChapters is re-derived
-      // fresh from durable state (chapters.status) on every such call, so an
-      // already-drafted chapter never gets regenerated.
-      for (const chapter of plannedChapters.slice(0, 1)) {
+      // Batched, time-boxed per invocation -- never the full plannedChapters
+      // list unconditionally, so a single HTTP request still can't run long
+      // enough to hit Vercel's function timeout generating a whole book's
+      // worth of chapters, but it CAN draft several chapters back-to-back
+      // when each one finishes quickly (see CHAPTER_BATCH_TIME_BUDGET_MS
+      // above -- this is the fix for Vercel's own infinite-loop protection
+      // tripping on too many same-route self-chain hops). The caller
+      // (runChunkedJob, or this route's own self-chain below) calls this
+      // route again with the same jobId while remainingChapters > 0;
+      // plannedChapters is re-derived fresh from durable state
+      // (chapters.status) on every such call, so an already-drafted chapter
+      // never gets regenerated.
+      const batchStartedAt = Date.now();
+      for (const chapter of plannedChapters) {
+        if (generated.length > 0 && Date.now() - batchStartedAt >= CHAPTER_BATCH_TIME_BUDGET_MS) break;
         const chapterLabel = `Chapter ${chapter.chapter_number}${chapter.title ? `: ${chapter.title}` : ""}`;
         currentJobSettings = await updateRevisionJobProgress(supabase, jobId, currentJobSettings, {
           currentUnit: chapterLabel,
@@ -625,15 +662,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
 
       revalidatePath(`/books/${bookId}`);
 
-      // This route only ever drafts one chapter per call and relies on the
-      // caller (the browser's runChunkedJob, via book-actions.tsx's "Write
-      // Your Chapters" button) to call it again while remainingChapters > 0
-      // -- so navigating away, closing the tab, or the tab getting
+      // This route drafts a time-boxed batch of chapters per call (see
+      // CHAPTER_BATCH_TIME_BUDGET_MS) and relies on the caller (the
+      // browser's runChunkedJob, via book-actions.tsx's "Write Your
+      // Chapters" button) to call it again while remainingChapters > 0 --
+      // so navigating away, closing the tab, or the tab getting
       // backgrounded/throttled silently stops all further drafting. Same
       // bug and same fix as rewrite-execute: self-chain a continuation so
       // the server keeps making progress regardless of whether anyone's
       // still watching. A still-open tab's own next call becomes redundant
-      // but harmless -- it just finds this chapter already drafted.
+      // but harmless -- it just finds this batch's chapters already drafted.
       //
       // A bare un-awaited `void fetch(...)` here is NOT safe: Vercel is free
       // to freeze/tear down this function's execution the instant the
@@ -653,13 +691,32 @@ export async function POST(request: Request, { params }: { params: Promise<{ boo
       if (!isJobDone && generated.length > 0) {
         const cookie = request.headers.get("cookie") || "";
         const selfUrl = new URL(request.url).toString();
-        after(() =>
-          fetch(selfUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", cookie },
-            body: JSON.stringify({ ...body, jobId }),
-          }).catch(() => {}),
-        );
+        after(async () => {
+          // The self-chain used to swallow every outcome (`.catch(() => {})`,
+          // response status never inspected) -- a failure here left zero
+          // trace anywhere, and Vercel's own runtime log retention is short
+          // enough (confirmed live: gone within ~1-2h) that even console.error
+          // alone isn't a durable enough record for a stall someone notices
+          // later. Persist the outcome onto the job row itself instead, which
+          // survives indefinitely and is what the Persistent AI Jobs panel
+          // and Jobs History already read from.
+          try {
+            const response = await fetch(selfUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", cookie },
+              body: JSON.stringify({ ...body, jobId }),
+            });
+            if (!response.ok) {
+              const bodyText = await response.text().catch(() => "");
+              console.error("generate-draft self-chain returned non-OK", { jobId, status: response.status, bodyText: bodyText.slice(0, 500) });
+              await recordSelfChainFailure(supabase, jobId, `Self-chain continuation returned HTTP ${response.status}.`);
+            }
+          } catch (selfChainError) {
+            const message = selfChainError instanceof Error ? selfChainError.message : String(selfChainError);
+            console.error("generate-draft self-chain fetch failed", { jobId, error: message });
+            await recordSelfChainFailure(supabase, jobId, `Self-chain continuation failed: ${message}`);
+          }
+        });
       }
 
       return NextResponse.json({
