@@ -84,7 +84,8 @@ export function CriticComparisonPanel({
               Accepted rewrite coverage
             </Text>
             <Text size="sm" c="dimmed">
-              {acceptedParagraphs.toLocaleString()} / {totalParagraphs.toLocaleString()} paragraphs
+              <span suppressHydrationWarning>{acceptedParagraphs.toLocaleString()}</span> /{" "}
+              <span suppressHydrationWarning>{totalParagraphs.toLocaleString()}</span> paragraphs
             </Text>
           </Group>
           <Progress value={acceptedPercent} color={readyForPostRewrite ? "green" : "yellow"} />

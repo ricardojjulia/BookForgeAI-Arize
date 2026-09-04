@@ -101,7 +101,9 @@ export function AdjustmentLogTable({ adjustments }: { adjustments: StewardPricin
             <Table.Tbody>
               {adjustments.map((row) => (
                 <Table.Tr key={row.id}>
-                  <Table.Td>{new Date(row.createdAt).toLocaleString()}</Table.Td>
+                  <Table.Td>
+                    <span suppressHydrationWarning>{new Date(row.createdAt).toLocaleString()}</span>
+                  </Table.Td>
                   <Table.Td>{row.tierId}</Table.Td>
                   <Table.Td>{fieldLabel(row.field)}</Table.Td>
                   <Table.Td>
@@ -112,7 +114,9 @@ export function AdjustmentLogTable({ adjustments }: { adjustments: StewardPricin
                   <Table.Td>
                     {row.oldValue ?? "—"} → {row.newValue ?? "—"}
                   </Table.Td>
-                  <Table.Td>{new Date(row.effectiveAt).toLocaleString()}</Table.Td>
+                  <Table.Td>
+                    <span suppressHydrationWarning>{new Date(row.effectiveAt).toLocaleString()}</span>
+                  </Table.Td>
                   <Table.Td>
                     <Text size="xs" c="dimmed" style={{ whiteSpace: "pre-wrap", maxWidth: 320 }}>
                       {JSON.stringify(row.triggerMetric)}

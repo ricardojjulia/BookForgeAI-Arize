@@ -229,7 +229,7 @@ export function PublishingLabWorkspace({
                       <Badge color={hasRenderedCovers ? "teal" : "gray"} variant="light">
                         {hasRenderedCovers ? "Real cover images" : "SVG fallback"}
                       </Badge>
-                      <Text size="sm">{new Date(item.created_at).toLocaleString()}</Text>
+                      <Text size="sm"><span suppressHydrationWarning>{new Date(item.created_at).toLocaleString()}</span></Text>
                     </Group>
                     <Badge color={typeof score === "number" ? (score >= 75 ? "green" : score >= 60 ? "yellow" : "red") : "gray"} variant="light">
                       Score {score ?? "--"}

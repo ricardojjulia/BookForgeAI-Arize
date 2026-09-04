@@ -106,7 +106,7 @@ export function WorldBibleEditor({
             </Badge>
           </Group>
           {discoveryProcessed && discoveryProcessedAt && (
-            <Text size="xs" c="dimmed">Last processed {new Date(discoveryProcessedAt).toLocaleString()}</Text>
+            <Text size="xs" c="dimmed">Last processed <span suppressHydrationWarning>{new Date(discoveryProcessedAt).toLocaleString()}</span></Text>
           )}
         </div>
         <Button leftSection={<IconSparkles size={16} />} loading={discovering} onClick={discoverWithAi}>

@@ -138,7 +138,9 @@ export function ChapterSnapshotPanel({ bookId, chapters }: Props) {
             <Group justify="space-between" wrap="nowrap">
               <Stack gap={2}>
                 <Text size="sm" fw={500}>{s.name}</Text>
-                <Badge size="xs" variant="light" color="gray">{new Date(s.created_at).toLocaleString()}</Badge>
+                <Badge size="xs" variant="light" color="gray">
+                  <span suppressHydrationWarning>{new Date(s.created_at).toLocaleString()}</span>
+                </Badge>
               </Stack>
               <Group gap="xs" wrap="nowrap">
                 <Button

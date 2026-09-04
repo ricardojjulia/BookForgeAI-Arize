@@ -71,7 +71,7 @@ export function BookRow({ book, finishedExport }: { book: Book; finishedExport: 
           <span style={{ fontSize: 11, color: "oklch(0.6 0.005 90)" }}>· {book.genre || "Manuscript"}</span>
         </div>
         <div style={{ fontSize: 13, color: "oklch(0.6 0.005 90)", marginTop: 3 }}>
-          {getBookAuthorDisplay(book)} · Updated {new Date(book.updated_at).toLocaleDateString()}
+          {getBookAuthorDisplay(book)} · Updated <span suppressHydrationWarning>{new Date(book.updated_at).toLocaleDateString()}</span>
         </div>
       </div>
 

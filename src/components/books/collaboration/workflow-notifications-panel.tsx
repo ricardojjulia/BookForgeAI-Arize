@@ -108,7 +108,7 @@ export function WorkflowNotificationsPanel({
                 </Group>
               )}
               <Text size="xs" c="dimmed" mt={6}>
-                {new Date(notification.created_at).toLocaleString()}
+                <span suppressHydrationWarning>{new Date(notification.created_at).toLocaleString()}</span>
               </Text>
             </Paper>
           ))}

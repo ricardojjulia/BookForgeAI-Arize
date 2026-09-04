@@ -232,8 +232,8 @@ function RunDetailPanel({ run }: { run: RunRecord }) {
               <Text size="sm" fw={600}>Manuscript at Run Start</Text>
             </Group>
             <Text size="sm">{run.book_stats.chapters} chapters</Text>
-            <Text size="sm">{run.book_stats.paragraphs.toLocaleString()} paragraphs</Text>
-            <Text size="sm" c="dimmed">≈ {estimateWords(run.book_stats.paragraphs)} words (estimated)</Text>
+            <Text size="sm"><span suppressHydrationWarning>{run.book_stats.paragraphs.toLocaleString()}</span> paragraphs</Text>
+            <Text size="sm" c="dimmed">≈ <span suppressHydrationWarning>{estimateWords(run.book_stats.paragraphs)}</span> words (estimated)</Text>
 
             {run.model && (
               <>
@@ -314,7 +314,7 @@ export function RunsTable({ runs }: { runs: RunRecord[] }) {
                     {run.book_title}
                   </Text>
                   <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-                    {fmtDate(run.created_at)}
+                    <span suppressHydrationWarning>{fmtDate(run.created_at)}</span>
                   </Text>
                 </Group>
 
@@ -334,7 +334,7 @@ export function RunsTable({ runs }: { runs: RunRecord[] }) {
                       : <Text size="xs" c="dimmed">—</Text>}
                   </Box>
                   <Text size="xs" c="dimmed" style={{ width: 64, textAlign: "right" }}>
-                    {run.book_stats.paragraphs.toLocaleString()} ¶
+                    <span suppressHydrationWarning>{run.book_stats.paragraphs.toLocaleString()}</span> ¶
                   </Text>
                 </Group>
               </Group>

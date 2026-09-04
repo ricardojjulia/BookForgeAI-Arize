@@ -107,7 +107,7 @@ export function AbridgementWorkspace({ bookId, plan, suggestions }: { bookId: st
           </Paper>
           <Paper withBorder radius="md" p="md" bg="#fbfaf8">
             <Text size="xs" c="dimmed">Approved estimated savings</Text>
-            <Text fw={900}>{approvedSavings.toLocaleString()} words</Text>
+            <Text fw={900}><span suppressHydrationWarning>{approvedSavings.toLocaleString()}</span> words</Text>
           </Paper>
         </SimpleGrid>
         <Group mt="lg">

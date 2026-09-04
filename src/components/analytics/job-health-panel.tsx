@@ -106,7 +106,9 @@ export function StaleIncidentsPanel({ incidents }: { incidents: StaleIncidentRow
             <Table.Tr key={incident.id}>
               <Table.Td>{incident.task}</Table.Td>
               <Table.Td>{incident.duration_ms ? fmtSeconds(incident.duration_ms) : "unknown"}</Table.Td>
-              <Table.Td>{new Date(incident.created_at).toLocaleString()}</Table.Td>
+              <Table.Td>
+                <span suppressHydrationWarning>{new Date(incident.created_at).toLocaleString()}</span>
+              </Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>

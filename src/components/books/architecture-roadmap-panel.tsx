@@ -219,7 +219,7 @@ function ChapterDetail({
         </Badge>
         {targetWords && (
           <Text size="xs" c="dimmed">
-            ~{targetWords.toLocaleString()} words
+            ~<span suppressHydrationWarning>{targetWords.toLocaleString()}</span> words
           </Text>
         )}
       </Group>

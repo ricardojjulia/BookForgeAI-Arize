@@ -587,7 +587,9 @@ export function RewriteExecutionPanel({
                 // single click rewrites the whole book. Mirror "Generate Planned
                 // Draft (3 of 6)"'s self-documenting label so partial coverage
                 // is visible up front, not just discoverable after the fact.
-                `Execute Rewrite (${Math.min(Number(maxUnits || eligibleParagraphCount), eligibleParagraphCount).toLocaleString()} of ${eligibleParagraphCount.toLocaleString()})`
+                <span suppressHydrationWarning>
+                  {`Execute Rewrite (${Math.min(Number(maxUnits || eligibleParagraphCount), eligibleParagraphCount).toLocaleString()} of ${eligibleParagraphCount.toLocaleString()})`}
+                </span>
               : "Execute Rewrite"}
           </Button>
           <Button component={Link} href={`/books/${bookId}/revisions`} color="teal" variant="light">
@@ -627,19 +629,19 @@ export function RewriteExecutionPanel({
         />
         <SimpleGrid cols={{ base: 1, md: 3 }}>
           <Paper withBorder radius="md" p="md" bg="gray.0">
-            <Text fw={800}>{untouchedParagraphCount.toLocaleString()}</Text>
+            <Text fw={800}><span suppressHydrationWarning>{untouchedParagraphCount.toLocaleString()}</span></Text>
             <Text size="sm" c="dimmed">
               untouched paragraphs ready for the next batch
             </Text>
           </Paper>
           <Paper withBorder radius="md" p="md" bg="gray.0">
-            <Text fw={800}>{pendingDraftParagraphCount.toLocaleString()}</Text>
+            <Text fw={800}><span suppressHydrationWarning>{pendingDraftParagraphCount.toLocaleString()}</span></Text>
             <Text size="sm" c="dimmed">
               paragraphs with pending drafts
             </Text>
           </Paper>
           <Paper withBorder radius="md" p="md" bg="gray.0">
-            <Text fw={800}>{acceptedParagraphCount.toLocaleString()}</Text>
+            <Text fw={800}><span suppressHydrationWarning>{acceptedParagraphCount.toLocaleString()}</span></Text>
             <Text size="sm" c="dimmed">
               paragraphs already accepted
             </Text>
@@ -849,7 +851,7 @@ function RewriteCompletionControls({
         <div>
           <Text fw={900}>Rewrite Campaign</Text>
           <Text size="sm" c="dimmed">
-            {remainingParagraphs.toLocaleString()} paragraphs still have no rewrite draft. Estimated safe batches: {estimatedBatches}.
+            <span suppressHydrationWarning>{remainingParagraphs.toLocaleString()}</span> paragraphs still have no rewrite draft. Estimated safe batches: {estimatedBatches}.
           </Text>
           <Text size="sm" c="dimmed">
             {sampledChapters}/{totalChaptersWithText} chapters sampled. {fullyCoveredChapters}/{totalChaptersWithText} chapters fully covered.
@@ -1312,7 +1314,7 @@ function CampaignMetric({ label, value }: { label: string; value: number | strin
       <Text size="xs" c="dimmed">
         {label}
       </Text>
-      <Text fw={900}>{displayValue}</Text>
+      <Text fw={900} suppressHydrationWarning>{displayValue}</Text>
     </Paper>
   );
 }

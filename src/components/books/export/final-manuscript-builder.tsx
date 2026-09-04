@@ -322,11 +322,12 @@ export function FinalManuscriptBuilder({
             <Paper withBorder radius="md" p="md" bg="gray.0">
               <Text fw={700}>Current manuscript state</Text>
               <Text size="sm" c="dimmed">
-                {acceptedParagraphs.toLocaleString()} of {totalParagraphs.toLocaleString()} paragraphs have accepted
+                <span suppressHydrationWarning>{acceptedParagraphs.toLocaleString()}</span> of{" "}
+                <span suppressHydrationWarning>{totalParagraphs.toLocaleString()}</span> paragraphs have accepted
                 revisions.
               </Text>
               <Text size="sm" c="dimmed">
-                {lockedParagraphs.toLocaleString()} locked passage{lockedParagraphs === 1 ? "" : "s"} will use original
+                <span suppressHydrationWarning>{lockedParagraphs.toLocaleString()}</span> locked passage{lockedParagraphs === 1 ? "" : "s"} will use original
                 text by default.
               </Text>
             </Paper>

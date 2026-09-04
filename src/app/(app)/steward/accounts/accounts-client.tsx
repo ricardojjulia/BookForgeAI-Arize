@@ -225,14 +225,29 @@ export function StewardAccountsClient({ initialAccounts, currentUserId }: { init
                   <Group gap="xs">
                     <Text fw={700}>{account.email || account.id}</Text>
                     {account.platformRole === "steward" && <Badge color="grape" variant="light">Steward</Badge>}
-                    {account.bannedUntil && <Badge color="red" variant="light">Banned until {new Date(account.bannedUntil).toLocaleDateString()}</Badge>}
+                    {account.bannedUntil && (
+                      <Badge color="red" variant="light">
+                        Banned until <span suppressHydrationWarning>{new Date(account.bannedUntil).toLocaleDateString()}</span>
+                      </Badge>
+                    )}
                     {account.deletionStatus === "pending" && <Badge color="yellow" variant="light">Pending deletion</Badge>}
                     {account.deletionStatus === "ready_for_purge" && <Badge color="red">Ready for purge</Badge>}
                   </Group>
                   <Text size="xs" c="dimmed">
-                    Joined {account.createdAt ? new Date(account.createdAt).toLocaleDateString() : "unknown"}
-                    {account.lastSignInAt ? ` · last sign-in ${new Date(account.lastSignInAt).toLocaleDateString()}` : ""}
-                    {account.purgeAfter ? ` · purge scheduled ${new Date(account.purgeAfter).toLocaleDateString()}` : ""}
+                    Joined{" "}
+                    <span suppressHydrationWarning>
+                      {account.createdAt ? new Date(account.createdAt).toLocaleDateString() : "unknown"}
+                    </span>
+                    {account.lastSignInAt ? (
+                      <span suppressHydrationWarning> · last sign-in {new Date(account.lastSignInAt).toLocaleDateString()}</span>
+                    ) : (
+                      ""
+                    )}
+                    {account.purgeAfter ? (
+                      <span suppressHydrationWarning> · purge scheduled {new Date(account.purgeAfter).toLocaleDateString()}</span>
+                    ) : (
+                      ""
+                    )}
                     {" · "}
                     {account.bookCount > 0 ? (
                       <Anchor component={Link} href={`/steward/books?ownerId=${account.id}`} size="xs">

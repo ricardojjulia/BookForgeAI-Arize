@@ -327,7 +327,7 @@ export function ReaderView({ bookId, chapters, paragraphs: initialParagraphs, in
                       <Stack gap={2}>
                         <Badge size="xs" color="orange" variant="light">Reader note</Badge>
                         <Text size="sm">{a.note}</Text>
-                        <Text size="xs" c="dimmed">{new Date(a.created_at).toLocaleString()}</Text>
+                        <Text size="xs" c="dimmed"><span suppressHydrationWarning>{new Date(a.created_at).toLocaleString()}</span></Text>
                       </Stack>
                       {canEdit && (
                         <ActionIcon size="sm" variant="subtle" color="teal" onClick={() => resolve(a.id)} title="Mark resolved">

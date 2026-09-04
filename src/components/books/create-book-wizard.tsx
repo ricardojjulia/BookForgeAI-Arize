@@ -930,7 +930,7 @@ function Metric({ label, value, ready }: { label: string; value: string | number
           {ready ? "ready" : "check"}
         </Badge>
       </Group>
-      <Text fw={900}>{value}</Text>
+      <Text fw={900} suppressHydrationWarning>{value}</Text>
     </Paper>
   );
 }

@@ -134,7 +134,11 @@ export function StewardBooksClient({
                 </Group>
                 <Text size="xs" c="dimmed">
                   {book.author_name || "No author set"} · owner {book.ownerEmail || book.owner_id}
-                  {book.updated_at ? ` · updated ${new Date(book.updated_at).toLocaleDateString()}` : ""}
+                  {book.updated_at ? (
+                    <span suppressHydrationWarning> · updated {new Date(book.updated_at).toLocaleDateString()}</span>
+                  ) : (
+                    ""
+                  )}
                 </Text>
               </div>
               <Button

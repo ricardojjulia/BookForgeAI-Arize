@@ -536,7 +536,7 @@ export function RevisionReviewList({
                                     Paragraph {version.paragraphNumber || "unknown"}
                                   </Title>
                                   <Text c="dimmed" size="sm">
-                                    {new Date(version.created_at).toLocaleString()}
+                                    <span suppressHydrationWarning>{new Date(version.created_at).toLocaleString()}</span>
                                   </Text>
                                 </div>
                                 <Group>
@@ -754,7 +754,13 @@ function getOlderJobOptions(versions: RevisionVersion[], latestRewriteJobId: str
     if (!version.revisionJobId || seen.has(version.revisionJobId)) return options;
     seen.add(version.revisionJobId);
     options.push({
-      label: `Run ${options.length + 1}${version.jobCreatedAt ? ` · ${new Date(version.jobCreatedAt).toLocaleDateString()}` : ""}`,
+      // ISO slice, not toLocaleDateString() -- this label is a plain string
+      // (Select `data`), not a JSX node, so it can't be wrapped in
+      // suppressHydrationWarning. A locale-formatted date here would still
+      // differ between SSR (server default locale) and the initial client
+      // render, the same hydration-mismatch class already fixed elsewhere
+      // on this page.
+      label: `Run ${options.length + 1}${version.jobCreatedAt ? ` · ${version.jobCreatedAt.slice(0, 10)}` : ""}`,
       value: version.revisionJobId,
     });
     return options;

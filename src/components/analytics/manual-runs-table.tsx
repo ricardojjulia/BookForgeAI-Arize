@@ -78,7 +78,9 @@ export function ManualRunsTable({ runs }: { runs: ManualRunRow[] }) {
                 ? `${run.progress.successful ?? 0}/${run.progress.totalUnits} ok${run.progress.failed ? `, ${run.progress.failed} failed` : ""}`
                 : "—"}
             </Table.Td>
-            <Table.Td>{new Date(run.createdAt).toLocaleString()}</Table.Td>
+            <Table.Td>
+              <span suppressHydrationWarning>{new Date(run.createdAt).toLocaleString()}</span>
+            </Table.Td>
           </Table.Tr>
         ))}
       </Table.Tbody>
