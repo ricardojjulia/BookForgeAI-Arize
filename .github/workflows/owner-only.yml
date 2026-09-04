@@ -1,0 +1,23 @@
+name: Owner-only access
+
+on:
+  pull_request_target:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  owner-only:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify actor
+        env:
+          ACTOR: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.user.login || github.actor }}
+        run: |
+          if [ "$ACTOR" != "ricardojjulia" ]; then
+            echo "Only repository owner ricardojjulia may push or open pull requests."
+            exit 1
+          fi
